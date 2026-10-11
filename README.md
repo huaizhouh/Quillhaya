@@ -14,7 +14,7 @@ conda activate toefl-writing-assistant
 bash run.sh
 ```
 
-环境使用 `conda-forge` 提供 Node.js 22 和 Python 3.11；应用本身不运行 Python。需要 **Node.js ≥ 22.12**。`run.sh` 在首次运行或锁文件变化后执行 `npm ci`，然后启动 Electron 开发版。首次启动还会下载官方 Electron 运行时，需联网。推荐 Apple Silicon 原生 arm64 环境，当前 Electron 要求 macOS Ventura 13 或以上。
+环境仅使用 `conda-forge` 提供 Node.js 22，不需要 Python/pip。需要 **Node.js ≥ 22.12**。`run.sh` 在首次运行、Electron 运行时缺失或锁文件变化后执行 `npm ci`，然后启动 Electron 开发版。首次安装还会下载官方 Electron 运行时，需联网。推荐 Apple Silicon 原生 arm64 环境，当前 Electron 要求 macOS Ventura 13 或以上。
 
 也可直接使用 Node：
 
@@ -122,7 +122,7 @@ CodeMirror → AnalysisCoordinator → 白名单 preload IPC
 
 编辑时重新计算句子与上下文签名，只提交变化或缺少结果的句子。内存缓存最多 300 条；上下文、模式、题目或模型配置改变时重新核验。句子内容未变但位置移动可安全复用。请求携带 `document_id`、`revision_id`、`sentence_id`、请求 UUID 和本地范围；返回时除文档与签名外，还核对当前原文和请求令牌。因此旧请求即使无法及时取消，也不会污染新文档或变化后的句子。
 
-任务书主体要求 Electron/TypeScript，第 10 节残留 PySide6、第 5/6 节要求 Pydantic，与主体架构及“不增加无必要 Python 服务”冲突。本项目采用 **Electron + React + TypeScript + Zod** 实现等价严格数据校验，没有引入 PySide6 或 Python 后端。Provider 接口预留原生 Anthropic/Gemini 适配位置，首版不实现这两种协议。
+本项目采用 **Electron + React + TypeScript + Zod**，全部应用逻辑在 Node.js/TypeScript 中完成，没有 Python 后端。Provider 接口预留原生 Anthropic/Gemini 适配位置，首版不实现这两种协议。详细实现与代码审阅入口见 [技术实现说明](docs/IMPLEMENTATION.md)。
 
 ## 文件清单
 
@@ -151,7 +151,7 @@ tests/
   e2e/app.spec.ts             实际 Electron 流程与真实本地 HTTP 测试
 scripts/dev-smoke.mjs         run.sh → Vite → Electron 开发启动验证
 docs/                        实际截图与验收记录
-environment.yml              Conda Node.js 22 / Python 3.11
+environment.yml              Conda Node.js 22
 run.sh                       源码启动入口
 package.json / package-lock.json
 electron.vite.config.ts / tsconfig.json

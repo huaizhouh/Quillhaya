@@ -1,0 +1,90 @@
+# 实际验收记录
+
+验证日期：2026-10-11。以下仅记录已实际执行的检查，不把未连接的真实云端或本地模型标记为通过。
+
+## 运行环境
+
+| 项目 | 实测值 |
+| --- | --- |
+| 系统 | macOS 27.0.1 |
+| 架构 | Apple Silicon / arm64 |
+| 开发 Node | Conda Node.js 22.23.2 |
+| Electron | 44.7.0，官方 darwin-arm64 运行时 |
+| TypeScript | 5.9.3 |
+| Vite / electron-vite | 6.4.4 / 4.0.1 |
+| React / CodeMirror view | 19.3.0 / 6.43.14 |
+| Vitest / Playwright | 5.0.3 / 1.64.0 |
+
+Electron 测试在正常 macOS 桌面权限下运行；外层文件沙箱会使 GUI 进程出现 SIGABRT/EPERM。应用自身的 `sandbox:true` 始终保持开启，并由 E2E 断言验证，没有通过关闭沙箱使测试通过。
+
+## 执行命令与结果
+
+| 命令 / 检查 | 实际结果 |
+| --- | --- |
+| `npm run typecheck` / 同等的 Node 22 `tsc --noEmit` | 通过，0 TypeScript 错误 |
+| `npm test` / Node 22 运行 Vitest | **6 个测试文件，46 项测试通过** |
+| `npm run build` | main、sandboxed preload、renderer 全部构建成功 |
+| `npm run test:e2e`，Conda Node 22 环境 | **12 项测试通过**，最后一次完整执行约 33.8 秒 |
+| `npm run test:dev`，Conda Node 22 环境 | **通过**：真实执行 `bash run.sh → Vite → Electron → Mock 反馈 → 接受修改`，退出码 0 |
+| `npm ci` | 在 `run.sh` 首次安装流程中实际执行成功；Electron 安装钩子已验证 |
+| 最终 `environment.yml` | 已用本次下载的 Conda 缓存，以 `conda env create --offline --prefix /private/tmp/twa-node22-final -f environment.yml` 实际创建仅含 Node 的 arm64 环境；未关闭 TLS 校验 |
+| `bash -n run.sh` | 通过 |
+| `npm install --package-lock-only --ignore-scripts` 的完整审计，以及 `npm audit --omit=optional` | 最终锁文件报告 0 个漏洞 |
+| 浅色 / 深色窗口截图 | 已生成并人工查看，正文内边距、字体、侧栏、建议卡片和主题正常 |
+
+`npm run test:dev` 使用临时测试数据目录，并在完成后终止其独立测试进程组。它不会启动或修改用户的真实草稿会话。源码构建与运行测试没有创建本项目的 `.app` 或 DMG。
+
+## 46 项逻辑测试覆盖
+
+- 句末标点、引号、缩写、首字母、小数、换行和未完成句子。
+- Markdown 标题、列表、围栏、行内代码、URL、缩进代码、UTF-16 偏移及英文单词数。
+- 快速连续输入请求合并；相同句子缓存；上下文变化失效。
+- 编辑后旧响应丢弃；文档切换隔离；位置移动和忽略状态。
+- 暂停分析、主动选区、IME 组合态调度和错误后继续编辑。
+- 合法 JSON、单个 Markdown 围栏、缺字段、类型错误、非中文说明、原文/片段不匹配。
+- 真实 Provider 接口的 Mock fetch：成功、401、404、400、429、网络、超时、取消、缺 Key、JSON 回退和有限修复。
+- Mock 正常、错误与词边界回归，不将 `He goes` 错改为 `He goeses`。
+- 主进程队列并发 2、请求启动间隔、排队及执行中取消。
+- 建议接受前不改文档、位置精确匹配、光标映射、CodeMirror 撤销。
+- 凭据加密边界与目标绑定；安全存储不可用时拒绝明文回退。
+- 原子草稿顺序、损坏草稿备份、外部文件变更取消、UTF-8/BOM/CRLF 保存与非法编码拒绝。
+
+## 12 项真实 Electron 测试
+
+1. 窗口实际启用隔离与沙箱，renderer 无 require/任意文件接口；原生菜单快捷键和 IPC 参数校验有效。
+2. 模型 4 秒延迟时继续输入第二句，反馈到达后焦点及文档中的逻辑光标位置保持不变。
+3. 未点击接受前正文不变；复制走受控剪贴板接口；主动接受后可用 ⌘Z 撤销；良好句子无改写按钮。
+4. 在途请求的原句被修改后，旧结果不出现在新句子上。
+5. 忽略后同句保持隐藏；折叠后继续分析；全文分析仅主动触发。
+6. 模拟离线错误不阻塞输入；设置中的连接测试使用所选配置。
+7. 无 API Key 时可继续编辑；多个模型配置持久化并可切换。
+8. 保存、另存为、打开、取消未保存离开、重启恢复草稿；自动草稿不覆盖原文件。
+9. 浅色和深色模式的实际窗口截图。
+10. 原生应用退出可取消；再次同意退出后保留最新草稿并真正结束应用。
+11. macOS `safeStorage` 实际加密/解密往返成功，密文不包含原测试字符串，bootstrap 不回传密钥。
+12. 主进程真实 fetch 访问临时 HTTP 兼容服务，端点拒绝 JSON mode 后回退成功；网络 payload 不含本地路径或文档 ID。
+
+文件测试用临时目录替代原生选择对话框的返回路径；实际磁盘写入、重启、IPC 和 CodeMirror 仍真实运行。复制测试替代 Electron 的剪贴板写函数以观察调用，避免覆盖用户剪贴板。Keychain 测试使用合成字符串，不需要真实模型 Key。
+
+## 已实际修复的问题
+
+- Mock 规则缺少词边界，导致将已经正确的 `He goes` 当作 `He go`。
+- CodeMirror 默认样式优先级覆盖正文 padding/font，已修正并查看截图。
+- Electron 运行时安装缺失，新增显式 postinstall 和启动时缺失检查。
+- Vite 开发 URL 末尾斜杠规范化导致严格来源检查误判，已规范化 URL 并通过实际开发启动验证。
+- 开发测试退出被应用的未保存确认阻塞，测试改为清理独立测试进程组；应用的正常保存提示保持不变。
+- 正常 macOS 退出区分“关窗口”与“退出应用”，避免退出请求只留下后台进程。
+- 损坏草稿在新会话自动保存前生成 recovery 备份。
+
+## 测试边界
+
+未提供实际云服务 API Key，也没有启动真实 Ollama/LM Studio/vLLM/llama.cpp 模型，因此不宣称这些模型已逐一联调。接口兼容性通过 Mock fetch 与真实本地 HTTP 服务测试；模型语言质量与服务参数仍需用户连接后检查。
+
+未全面人工验证每一种系统输入法、辅助技术、显示器组合和超长文档性能。没有执行签名、公证、DMG 或本项目应用打包。
+
+截图：
+
+- [浅色界面](workspace-light.png)
+- [深色界面](workspace-dark.png)
+
+代码与实现细节：[IMPLEMENTATION.md](IMPLEMENTATION.md)。

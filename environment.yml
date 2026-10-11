@@ -4,5 +4,4 @@ channels:
   - nodefaults
 dependencies:
   - nodejs=22
-  - python=3.11
-# Python 仅供开发工具使用。应用本身不启动 Python，npm 依赖由 npm ci 安装。
+# Electron、React 与测试工具均由 npm ci 按锁文件安装；无需 Python/pip。
