@@ -1,0 +1,68 @@
+import { Check, CheckCircle2, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { makeProfile, presetInfo, SettingsSchema, type ModelProfile, type Settings } from '../models/schema';
+
+export function SettingsDialog({ settings, keyStatus, onClose, onSaved }: { settings: Settings; keyStatus: Record<string, boolean>; onClose: () => void; onSaved: (settings: Settings, keyStatus: Record<string, boolean>) => void }) {
+  const [draft, setDraft] = useState<Settings>(() => structuredClone(settings));
+  const [selected, setSelected] = useState(settings.defaultProfileId);
+  const [keys, setKeys] = useState<Record<string, string | null>>({});
+  const [headerText, setHeaderText] = useState(JSON.stringify(settings.profiles.find(p => p.id === selected)!.headers, null, 2));
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const profile = draft.profiles.find(p => p.id === selected)!;
+  useEffect(() => { dialog.current?.showModal(); }, []);
+  const patch = (value: Partial<ModelProfile>) => setDraft(d => ({ ...d, profiles: d.profiles.map(p => p.id === selected ? { ...p, ...value } : p) }));
+  const select = (p: ModelProfile) => { setSelected(p.id); setHeaderText(JSON.stringify(p.headers, null, 2)); setMessage(''); };
+  const withHeaders = () => {
+    try {
+      const next = { ...draft, profiles: draft.profiles.map(p => p.id === selected ? { ...p, headers: JSON.parse(headerText) } : p) };
+      const parsed = SettingsSchema.safeParse(next);
+      if (!parsed.success) { setMessage(`请检查设置：${parsed.error.issues[0].message}`); return null; }
+      return parsed.data;
+    } catch { setMessage('附加 Headers 必须是合法的 JSON 对象。'); return null; }
+  };
+  const save = async () => {
+    const next = withHeaders(); if (!next) return;
+    setBusy(true);
+    try { const reply = await window.desktop.saveSettings(next, keys); if (reply.ok) { setKeys({}); onSaved(reply.value.settings, reply.value.keyStatus); onClose(); } else setMessage(reply.error.message); }
+    catch { setMessage('设置保存失败，请重试。'); } finally { setBusy(false); }
+  };
+  const test = async () => {
+    const next = withHeaders(); if (!next) return;
+    setBusy(true); setMessage('正在测试连接与结构化反馈…');
+    try { const reply = await window.desktop.testConnection(next.profiles.find(p => p.id === selected)!, keys[selected] ?? undefined); setMessage(reply.ok ? reply.value : reply.error.message); }
+    catch { setMessage('连接测试失败，请检查配置。'); } finally { setBusy(false); }
+  };
+  return <dialog className="settings-dialog" ref={dialog} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby="settings-title">
+    <div className="settings-heading"><div><span className="eyebrow">MAKE IT YOURS</span><h2 id="settings-title"><SlidersHorizontal size={21} />写作设置</h2></div><button className="icon-button" aria-label="关闭设置" onClick={onClose}><X size={20} /></button></div>
+    <div className="settings-content">
+      <aside className="profile-list"><span className="eyebrow">模型配置</span>{draft.profiles.map(p => <button className={p.id === selected ? 'selected' : ''} key={p.id} onClick={() => { const next = withHeaders(); if (next) { setDraft(next); select(next.profiles.find(n => n.id === p.id)!); } }}><span>{p.name}</span>{p.id === draft.defaultProfileId && <Check size={13} />}</button>)}
+        <button className="add-profile" onClick={() => { const next = withHeaders(); if (!next) return; const p = makeProfile('custom', crypto.randomUUID()); setDraft({ ...next, profiles: [...next.profiles, p] }); select(p); }}><Plus size={15} />添加模型</button>
+        <div className="local-note"><span className="small-leaf">⌘</span><p>你的写作空间，<br />由你选择模型。</p></div>
+      </aside>
+      <div className="settings-fields">
+        <div className="section-label">连接与模型 <button className="text-button danger" disabled={draft.profiles.length === 1 || busy} onClick={() => { const remaining = draft.profiles.filter(p => p.id !== selected); setDraft({ ...draft, profiles: remaining, defaultProfileId: draft.defaultProfileId === selected ? remaining[0].id : draft.defaultProfileId }); setKeys(k => Object.fromEntries(Object.entries(k).filter(([id]) => id !== selected))); select(remaining[0]); }}><Trash2 size={13} />删除配置</button></div>
+        <div className="field-grid"><label>配置名称<input value={profile.name} onChange={e => patch({ name: e.target.value })} /></label><label>Provider<select aria-label="Provider" value={profile.kind} onChange={e => { const p = makeProfile(e.target.value as ModelProfile['kind'], selected); patch(p); setHeaderText('{}'); }}>
+          {Object.entries(presetInfo).map(([key, p]) => <option key={key} value={key}>{p.name}</option>)}</select></label></div>
+        {profile.kind !== 'mock' ? <>
+          <label>Base URL<input aria-label="Base URL" value={profile.baseUrl} onChange={e => patch({ baseUrl: e.target.value })} placeholder="https://api.example.com/v1" /></label>
+          <label>Model<input aria-label="Model" value={profile.model} onChange={e => patch({ model: e.target.value })} /><small>填写服务端实际模型 ID，无需获取模型列表。</small></label>
+          <div className="field-grid"><label>认证方式<select value={profile.auth} onChange={e => patch({ auth: e.target.value as ModelProfile['auth'] })}><option value="bearer">Bearer API Key</option><option value="none">无需认证</option><option value="header">自定义认证 Header</option></select></label><label>Temperature（可选）<input type="number" min="0" max="2" step="0.1" placeholder="由模型决定" value={profile.temperature ?? ''} onChange={e => patch({ temperature: e.target.value === '' ? null : Number(e.target.value) })} /></label></div>
+          {profile.auth === 'header' && <label>认证 Header 名称<input value={profile.authHeader} onChange={e => patch({ authHeader: e.target.value })} /></label>}
+          {profile.auth !== 'none' && <>
+            <label>API Key <span className="field-hint">{keys[selected] === null ? '保存后删除' : keyStatus[selected] ? '已有安全存储密钥' : '尚未配置'}</span><input aria-label="API Key" type="password" autoComplete="off" value={keys[selected] ?? ''} placeholder="留空保留现有密钥" onChange={e => setKeys(k => { const next = { ...k }; if (e.target.value) next[selected] = e.target.value; else delete next[selected]; return next; })} /></label>
+            <button className="text-button" onClick={() => setKeys(k => ({ ...k, [selected]: null }))}>删除已保存密钥</button>
+            <label>或使用环境变量名称<input value={profile.envKey} placeholder="例如 OPENAI_API_KEY" onChange={e => patch({ envKey: e.target.value })} /><small>修改端点后须重新输入密钥；环境变量会发送到此处指定的端点。</small></label>
+          </>}
+          <details className="advanced"><summary>附加 Headers（非密钥）</summary><label>JSON 对象<textarea value={headerText} onChange={e => { setHeaderText(e.target.value); try { patch({ headers: JSON.parse(e.target.value) }); } catch { /* validated on save */ } }} spellCheck={false} rows={3} placeholder={'{"HTTP-Referer":"https://example.com"}'} /></label></details>
+        </> : <div className="mock-settings"><strong>这是演示模式，不是真实 AI 评估</strong><p>仅用固定规则演示语法建议、良好表达和异步状态，不发送网络请求。</p><label>模拟响应<select aria-label="模拟响应" value={profile.mockBehavior} onChange={e => patch({ mockBehavior: e.target.value as ModelProfile['mockBehavior'] })}><option value="normal">正常响应</option><option value="slow">慢速响应（4 秒）</option><option value="error">模拟连接失败</option></select></label></div>}
+        <div className="field-grid"><label>请求超时（秒）<input type="number" min="1" max="120" value={profile.timeoutMs / 1000} onChange={e => patch({ timeoutMs: Number(e.target.value) * 1000 })} /></label><label className="checkbox-field"><input type="checkbox" checked={draft.defaultProfileId === selected} onChange={() => setDraft({ ...draft, defaultProfileId: selected })} />设为当前及默认模型</label></div>
+        <div className="section-label">编辑与外观</div>
+        <div className="field-grid"><label>主题<select value={draft.theme} onChange={e => setDraft({ ...draft, theme: e.target.value as Settings['theme'] })}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label><label>正文字号<input type="number" min="14" max="26" value={draft.fontSize} onChange={e => setDraft({ ...draft, fontSize: Number(e.target.value) })} /></label><label>停顿延迟（毫秒）<input aria-label="停顿延迟" type="number" min="300" max="10000" step="100" value={draft.debounceMs} onChange={e => setDraft({ ...draft, debounceMs: Number(e.target.value) })} /></label><label className="checkbox-field"><input type="checkbox" checked={draft.autoAnalyze} onChange={e => setDraft({ ...draft, autoAnalyze: e.target.checked })} />自动分析</label></div>
+        <p className="privacy-note"><CheckCircle2 size={15} />文本只发送到你选定的服务。云端服务接收待分析句子和必要上下文；本地端点的数据处理由本地服务决定。“分析全文”会主动发送全文。密钥仅作为该端点的认证凭据使用，通过系统安全存储加密保存，不写入日志。</p>
+      </div>
+    </div>
+    <footer className="settings-footer"><p role="status">{message}</p><button className="secondary-button" disabled={busy} onClick={() => void test()}>测试连接</button><button className="primary-button" disabled={busy} onClick={() => void save()}>{busy ? '处理中…' : '保存设置'}</button></footer>
+  </dialog>;
+}

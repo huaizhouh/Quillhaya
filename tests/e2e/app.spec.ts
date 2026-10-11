@@ -1,0 +1,226 @@
+import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import { mkdtemp, readFile, mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { createServer } from 'node:http';
+
+let app: ElectronApplication;
+let page: Page;
+let userData: string;
+async function launch(directory: string) {
+  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)), TWA_TEST_USER_DATA: directory };
+  delete env.ELECTRON_RUN_AS_NODE;
+  app = await electron.launch({ args: [resolve('out/main/main.js')], env });
+  page = await app.firstWindow();
+  await expect(page.getByTestId('writing-editor')).toBeVisible();
+}
+test.beforeEach(async () => { userData = await mkdtemp(join(tmpdir(), 'twa-e2e-')); await launch(userData); });
+test.afterEach(async () => { if (app) await app.evaluate(({ app: main }) => main.exit(0)).catch(() => {}); });
+async function write(text: string) { const editor = page.getByTestId('writing-editor'); await editor.fill(text); await editor.focus(); }
+async function chooseMockBehavior(value: string) {
+  await page.getByRole('button', { name: '打开设置' }).click();
+  await page.getByLabel('模拟响应').selectOption(value);
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+}
+
+test('real sandboxed Electron window, native menus and isolated API', async () => {
+  const security = await app.evaluate(({ BrowserWindow, Menu }) => {
+    const preferences = (BrowserWindow.getAllWindows()[0].webContents as unknown as { getLastWebPreferences(): { contextIsolation: boolean; sandbox: boolean; nodeIntegration: boolean } }).getLastWebPreferences();
+    const menu = Menu.getApplicationMenu();
+    return { isolation: preferences.contextIsolation, sandbox: preferences.sandbox, node: preferences.nodeIntegration,
+      fileMenu: menu?.items.find(i => i.label === '文件')?.submenu?.items.map(i => ({ label: i.label, accelerator: i.accelerator })) };
+  });
+  expect(security).toMatchObject({ isolation: true, sandbox: true, node: false });
+  expect(security.fileMenu).toContainEqual({ label: '保存', accelerator: 'CmdOrCtrl+S' });
+  expect(await page.evaluate(() => ({ require: typeof (window as unknown as { require?: unknown }).require, hasAnalyze: typeof window.desktop.analyze, hasFS: 'readFile' in window.desktop }))).toEqual({ require: 'undefined', hasAnalyze: 'function', hasFS: false });
+  const invalid = await page.evaluate(() => window.desktop.analyze({ unexpected: true } as never));
+  expect(invalid.ok).toBe(false);
+});
+
+test('continuous typing preserves focus and cursor while feedback arrives', async () => {
+  await chooseMockBehavior('slow');
+  const editor = page.getByTestId('writing-editor');
+  await write('I am agree with you.');
+  await expect(page.getByTestId('feedback-card').first()).toContainText('分析中');
+  await page.keyboard.press('End');
+  await page.keyboard.insertText(' I am still writing');
+  const logicalCursor = () => page.evaluate(() => {
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('.cm-content')!);
+    range.setEnd(selection.anchorNode!, selection.anchorOffset);
+    return range.toString().length;
+  });
+  const cursor = await logicalCursor();
+  await expect(page.getByRole('button', { name: '接受修改', exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(editor).toBeFocused();
+  expect(await logicalCursor()).toBe(cursor);
+  await expect(editor).toHaveText('I am agree with you. I am still writing');
+});
+
+test('suggestion only applies on click and is undoable; good sentences stay unchanged', async () => {
+  await write('I am agree with you.');
+  await expect(page.getByRole('button', { name: '接受修改', exact: true })).toBeVisible();
+  await expect(page.getByTestId('writing-editor')).toHaveText('I am agree with you.');
+  await app.evaluate(({ clipboard }) => { clipboard.writeText = async (text: string) => { (globalThis as unknown as { copiedText: string }).copiedText = text; }; });
+  await page.getByRole('button', { name: '复制推荐句' }).click();
+  expect(await app.evaluate(() => (globalThis as unknown as { copiedText: string }).copiedText)).toBe('I agree with you.');
+  await page.getByRole('button', { name: '接受修改', exact: true }).click();
+  await expect(page.getByTestId('writing-editor')).toHaveText('I agree with you.');
+  await expect(page.getByTestId('writing-editor')).toBeFocused();
+  await page.keyboard.press('Meta+z');
+  await expect(page.getByTestId('writing-editor')).toHaveText('I am agree with you.');
+  await write('Learning takes practice.');
+  await expect(page.getByTestId('feedback-card')).toContainText('表达良好');
+  await expect(page.getByRole('button', { name: '接受修改', exact: true })).toHaveCount(0);
+});
+
+test('editing during an in-flight request never shows or applies the old response', async () => {
+  await chooseMockBehavior('slow');
+  await write('He go home.'); await expect(page.getByTestId('feedback-card')).toContainText('分析中');
+  await write('He goes home.');
+  await expect(page.getByTestId('feedback-card')).toContainText('表达良好', { timeout: 10_000 });
+  await expect(page.getByRole('button', { name: '接受修改', exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('writing-editor')).toHaveText('He goes home.');
+});
+
+test('ignore stays hidden, collapse keeps analysis enabled, full review is explicit', async () => {
+  await write('I am agree with you.');
+  await page.getByRole('button', { name: '忽略', exact: true }).click();
+  await expect(page.getByTestId('feedback-card')).toHaveCount(0);
+  await page.getByTestId('writing-editor').click(); await page.keyboard.press('Meta+End'); await page.keyboard.insertText(' ');
+  await expect(page.getByTestId('feedback-card')).toHaveCount(0);
+  await page.getByRole('button', { name: '折叠反馈' }).click();
+  await write('Learning takes practice.');
+  await expect(page.getByLabel('AI Writing Feedback')).toHaveCount(0);
+  await page.getByRole('button', { name: '展开反馈' }).click();
+  await expect(page.getByTestId('feedback-card')).toContainText('表达良好');
+  await page.getByRole('button', { name: '分析全文', exact: true }).click();
+  await expect(page.getByTestId('feedback-card').first()).toContainText('全文');
+  await expect(page.getByTestId('feedback-card').first()).toContainText('表达良好');
+});
+
+test('offline errors remain non-blocking and connection tests use the selected configuration', async () => {
+  await chooseMockBehavior('error'); await write('Learning takes practice.');
+  await expect(page.getByTestId('feedback-card')).toContainText('模拟连接失败');
+  await page.getByTestId('writing-editor').focus(); await page.keyboard.press('Meta+End'); await page.keyboard.insertText(' We keep writing.');
+  await expect(page.getByTestId('writing-editor')).toContainText('We keep writing.');
+  await page.getByRole('button', { name: '打开设置' }).click(); await page.getByLabel('模拟响应').selectOption('normal');
+  await page.getByRole('button', { name: '测试连接', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Mock 演示可用');
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await expect(page.getByTestId('feedback-card').first()).toContainText('表达良好');
+});
+
+test('missing API key does not disable the editor; multiple configurations persist', async () => {
+  const configured = await page.evaluate(async () => {
+    const boot = await window.desktop.bootstrap(); if (!boot.ok) throw new Error('bootstrap failed');
+    const profile = { ...boot.value.settings.profiles[0], id: 'missing-key', name: 'Missing Key', kind: 'custom' as const, auth: 'bearer' as const, envKey: '', baseUrl: 'http://127.0.0.1:65530/v1' };
+    return window.desktop.saveSettings({ ...boot.value.settings, profiles: [...boot.value.settings.profiles, profile], defaultProfileId: profile.id }, {});
+  });
+  expect(configured.ok).toBe(true); await page.reload(); await expect(page.getByTestId('writing-editor')).toBeVisible();
+  await write('We keep writing.'); await expect(page.getByTestId('feedback-card')).toContainText('尚未配置 API Key');
+  await expect(page.getByTestId('writing-editor')).toBeFocused();
+  await expect(page.getByLabel('当前模型')).toHaveValue('missing-key');
+  await page.getByLabel('当前模型').selectOption('mock'); await expect(page.getByTestId('feedback-card')).toContainText('表达良好');
+});
+
+test('save, save-as, open, unsaved cancellation and draft recovery', async () => {
+  const target = join(userData, 'essay.md');
+  await app.evaluate(({ dialog }, path) => {
+    dialog.showSaveDialog = (async () => ({ canceled: false, filePath: path })) as typeof dialog.showSaveDialog;
+    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [path] })) as typeof dialog.showOpenDialog;
+    dialog.showMessageBox = (async () => ({ response: 2, checkboxChecked: false })) as typeof dialog.showMessageBox;
+  }, target);
+  await write('Learning takes practice.');
+  await page.getByRole('button', { name: '新建文档' }).click();
+  await expect(page.getByTestId('writing-editor')).toHaveText('Learning takes practice.');
+  await page.getByRole('button', { name: '保存', exact: false }).first().click();
+  await expect(page.locator('.document-name')).toHaveText('essay.md');
+  expect(await readFile(target, 'utf8')).toBe('Learning takes practice.');
+  await app.evaluate(({ Menu }) => { Menu.getApplicationMenu()?.items.find(i => i.label === '文件')?.submenu?.items.find(i => i.label === '另存为…')?.click(); });
+  await expect(page.locator('.save-pill')).toHaveText('已保存');
+  await page.getByRole('button', { name: '新建文档' }).click(); await expect(page.locator('.document-name')).toHaveText('未命名.md');
+  await page.getByRole('button', { name: '打开文档' }).click(); await expect(page.getByTestId('writing-editor')).toHaveText('Learning takes practice.');
+  await write('Unsaved draft survives a restart.');
+  await expect(page.locator('.draft-status')).toContainText('草稿已自动保存');
+  await app.evaluate(({ app: main }) => main.exit(0));
+  await launch(userData);
+  await expect(page.getByTestId('writing-editor')).toHaveText('Unsaved draft survives a restart.');
+  await expect(page.locator('.restore-banner')).toBeVisible();
+  expect(await readFile(target, 'utf8')).toBe('Learning takes practice.');
+});
+
+test('captures the implemented writing workspace in light and dark themes', async () => {
+  await page.getByRole('button', { name: '体验示例反馈' }).click();
+  await expect(page.getByRole('button', { name: '接受修改', exact: true })).toBeVisible();
+  await expect(page.locator('.feedback-summary')).toContainText('4 句表达良好', { timeout: 10_000 });
+  await page.getByRole('button', { name: '写作题目与情境', exact: false }).click();
+  await mkdir(resolve('docs'), { recursive: true });
+  await page.screenshot({ path: resolve('docs/workspace-light.png') });
+  await page.getByRole('button', { name: '打开设置' }).click();
+  await page.getByLabel('主题', { exact: false }).selectOption('dark');
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.getByRole('button', { name: '接受修改', exact: true })).toBeVisible();
+  await page.screenshot({ path: resolve('docs/workspace-dark.png') });
+});
+
+test('native quit can be cancelled and then closes after preserving the latest draft', async () => {
+  await write('My latest unsaved sentence.');
+  await app.evaluate(({ dialog, app: main }) => {
+    dialog.showMessageBox = (async () => ({ response: 2, checkboxChecked: false })) as typeof dialog.showMessageBox;
+    main.quit();
+  });
+  await expect(page.getByTestId('writing-editor')).toHaveText('My latest unsaved sentence.');
+  await expect(page.locator('.draft-status')).toContainText('草稿已自动保存');
+  await app.evaluate(({ dialog }) => { dialog.showMessageBox = (async () => ({ response: 1, checkboxChecked: false })) as typeof dialog.showMessageBox; });
+  const closed = app.waitForEvent('close');
+  await app.evaluate(({ app: main }) => main.quit());
+  await closed;
+  const draft = JSON.parse(await readFile(join(userData, 'draft.json'), 'utf8'));
+  expect(draft.document.text).toBe('My latest unsaved sentence.');
+});
+
+test('real macOS safeStorage round trip is encrypted and never exposed by bootstrap', async () => {
+  const encrypted = await app.evaluate(({ safeStorage }) => {
+    const available = safeStorage.isEncryptionAvailable();
+    if (!available) return { available, roundTrip: false, encrypted: false };
+    const value = 'synthetic-storage-validation';
+    const ciphertext = safeStorage.encryptString(value);
+    return { available, roundTrip: safeStorage.decryptString(ciphertext) === value, encrypted: !ciphertext.includes(Buffer.from(value)) };
+  });
+  expect(encrypted).toEqual({ available: true, roundTrip: true, encrypted: true });
+  const bootstrap = await page.evaluate(() => window.desktop.bootstrap());
+  expect(JSON.stringify(bootstrap)).not.toContain('synthetic-storage-validation');
+});
+
+test('main process talks to a real HTTP compatible endpoint and falls back from JSON mode', async () => {
+  const received: Record<string, unknown>[] = [];
+  const server = createServer((req, res) => {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      const body = JSON.parse(raw); received.push(body);
+      res.setHeader('Content-Type', 'application/json');
+      if (body.response_format) { res.writeHead(400); res.end(JSON.stringify({ error: 'response_format unsupported' })); return; }
+      const input = JSON.parse(body.messages[1].content);
+      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ sentence_id: input.sentence_id, original_text: input.original_text, status: 'good', overall_explanation_zh: '表达良好，无需修改。', suggested_revision: null, issues: [], confidence: 0.8 }) } }] }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address() as { port: number };
+    const result = await page.evaluate(async port => {
+      const boot = await window.desktop.bootstrap(); if (!boot.ok) throw new Error('bootstrap');
+      const profile = { ...boot.value.settings.profiles[0], id: 'http-test', name: 'Local HTTP test', kind: 'custom' as const, baseUrl: `http://127.0.0.1:${port}/v1` };
+      return window.desktop.saveSettings({ ...boot.value.settings, profiles: [profile], defaultProfileId: profile.id }, {});
+    }, address.port);
+    expect(result.ok).toBe(true); await page.reload(); await expect(page.getByTestId('writing-editor')).toBeVisible();
+    await write('Learning takes practice.'); await expect(page.getByTestId('feedback-card')).toContainText('表达良好');
+    expect(received).toHaveLength(2); expect(received[0]).toHaveProperty('response_format'); expect(received[1]).not.toHaveProperty('response_format');
+    const payload = JSON.stringify(received); expect(payload).not.toContain('document_id'); expect(payload).not.toContain(userData);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});
