@@ -2,7 +2,41 @@
 
 最新验证日期：2026-10-12。以下区分本次修复复验与初版历史记录，只记录实际执行的检查。
 
-## 2026-10-12 四项问题修复复验
+## 2026-10-12 issue1012_2 四项修复复验（最新）
+
+| 检查 | 实际结果 |
+| --- | --- |
+| Conda Node 22.23.2：`npm run check` | 类型检查、**8 个文件 / 79 项单元测试**、生产构建全部通过 |
+| Conda Node 22.23.2：完整 Playwright Electron 测试 | **29 项通过**，约 1.1 分钟 |
+| Conda Node 22.23.2：`scripts/dev-smoke.mjs` | **通过**：`bash run.sh → Vite → sandboxed Electron → Mock 反馈 → 接受修改` |
+| `TWA_OLLAMA_PROFILE=a7fbbff2-eb4c-4d5e-adee-3a910e1fb44d TWA_OLLAMA_OLD_MODEL=gemma4:12b node scripts/ollama-close-smoke.mjs` | **真实 gemma4:12b-mlx 固定句子分析及原生退出卸载通过**；退出前后分别用 `/api/ps` 确认驻留/不驻留，总计 28.326 秒；沿用其当前 120 秒超时 |
+| 真实旧模型 ID 核验 | gemma4:12b 已不在本机模型列表；主进程收到卸载 404 后通过 `/api/ps` 确认不驻留，返回 `alreadyReleased`，没有误报 |
+| 浅色/深色截图 | 已查看红色波浪线与黄色虚线，具备不同线型和悬停说明 |
+
+新增 11 项单元测试和 7 项 E2E。回归覆盖连续句中修改等待完整去抖、不同句子的短触发隔离、两类正文装饰、普通关窗/⌘Q/恢复退出等待卸载、退出取消、清理失败返回写作再重试、模型 ID 改动后的历史记录核验。模拟延迟卸载时，确认收到卸载成功前窗口仍存在、后续排队分析不再发送、草稿保留最新内容。
+
+首次新增 E2E 为 6/7：状态文案前含“·”图标，测试的精确文本断言不匹配；连续键入期间没有多余请求的断言已通过。修正断言后，完整重跑 29 项通过。真实模型测试使用隔离的 Electron 用户目录，只读取现有模型设置并发送固定句子，不读取用户作文或凭据、不修改真实配置。
+
+逐项根因、技术栈及代码入口：[ISSUE1012-2-IMPLEMENTATION.md](ISSUE1012-2-IMPLEMENTATION.md)。截图：[浅色标记](issue1012-2-marks-light.png)、[深色标记](issue1012-2-marks-dark.png)。
+
+## 2026-10-12 issue1012 六项修复复验（历史记录）
+
+| 检查 | 实际结果 |
+| --- | --- |
+| Conda Node 22.23.2 执行 `npm run check` | 类型检查通过；**8 个测试文件、68 项单元测试通过**；main、sandboxed preload、renderer 构建通过 |
+| Conda Node 22.23.2 运行 Playwright CLI | **22 项真实 Electron E2E 通过**，完整执行 48.4 秒 |
+| Conda Node 22.23.2 运行 `scripts/dev-smoke.mjs` | **通过**：`bash run.sh → Vite → sandboxed Electron → Mock 反馈 → 接受修改` |
+| `TWA_OLLAMA_PROFILE=mock node scripts/ollama-lifecycle-smoke.mjs` | 已有配置的实际 Provider 是 Ollama、模型为 **gemma3:12b**；测试后卸载和主动停止均通过，两次 `/api/ps` 确认不驻留，总计 23.335 秒 |
+| 默认 gemma4:12b 生命周期检查 | 保留原 30 秒超时，连接测试超时；清理收到卸载确认，**不算推理通过** |
+| 截图检查 | 已查看横向设置标题、题目拖动手柄、计时按钮、上下文变化提示及深色界面 |
+
+新增 6 项 E2E 验证设置标题布局与手柄、计时控制、接受建议后邻句反馈保留及重评、只测试当前配置、取消测试后卸载、停止后不自动重载。新增逻辑测试覆盖上下文版本、计时状态及模型生命周期的失败/取消/超时边界。
+
+首次完整 E2E 为 21/22，通过失败项定位到首次保存外观时对象字段顺序引发的配置误判；修正实际比较逻辑后，完整重跑 22 项通过。E2E 与开发冒烟均使用隔离的临时数据目录，真实 Ollama 检查只读取模型设置及发送固定句子，没有读取作文或凭据，也没有修改实际配置。
+
+技术栈、逐项根因、代码入口、复验命令与边界见 [ISSUE1012-IMPLEMENTATION.md](ISSUE1012-IMPLEMENTATION.md)。截图：[设置页](issue1012-settings.png)、[反馈保留](issue1012-workspace.png)。
+
+## 2026-10-12 四项问题修复复验（历史记录）
 
 | 检查 | 实际结果 |
 | --- | --- |

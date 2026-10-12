@@ -73,6 +73,7 @@ export const DocumentSchema = z.object({
 export type WritingDocument = z.infer<typeof DocumentSchema>;
 export type MenuCommand = 'new' | 'open' | 'save' | 'saveAs' | 'settings' | 'close';
 export type AnalysisProgress = { requestId: string; phase: 'queued' | 'running' };
+export type StopModelsResult = { released: string[]; alreadyReleased: string[]; failed: { model: string; message: string }[] };
 export type Bootstrap = { settings: Settings; document: WritingDocument | null; restored: boolean; keyStatus: Record<string, boolean>; storageNotice?: string };
 
 export const presetInfo: Record<ModelProfile['kind'], { name: string; url: string; model: string; auth: ModelProfile['auth']; envKey: string }> = {
@@ -94,7 +95,8 @@ export const defaultSettings: Settings = { theme: 'system', fontSize: 18, deboun
 export interface DesktopAPI {
   bootstrap(): Promise<Reply<Bootstrap>>;
   saveSettings(settings: Settings, keys: Record<string, string | null>): Promise<Reply<{ settings: Settings; keyStatus: Record<string, boolean>; analysisChanged: boolean }>>;
-  testConnection(profile: ModelProfile, key?: string): Promise<Reply<string>>;
+  testConnection(profile: ModelProfile, key?: string, requestId?: string): Promise<Reply<string>>;
+  stopModels(profile?: ModelProfile, key?: string): Promise<Reply<StopModelsResult>>;
   analyze(request: AnalysisRequest): Promise<Reply<AnalysisResult>>;
   cancel(requestId: string): Promise<void>;
   draft(document: WritingDocument): Promise<Reply<void>>;

@@ -17,6 +17,7 @@ export class RequestQueue {
   private active = new Map<string, Job>();
   private nextStart = 0;
   private timer?: ReturnType<typeof setTimeout>;
+  private idleWaiters = new Set<() => void>();
   constructor(private concurrency = 2, private intervalMs = 300) {}
   add<T>(id: string, run: (signal: AbortSignal) => Promise<T>, serialKey?: string): Promise<T> {
     if (this.pending.length >= 200) return Promise.reject(new AppError('queue_full', '待分析内容较多，请稍后重试。', true));
@@ -29,11 +30,22 @@ export class RequestQueue {
     this.active.get(id)?.controller.abort();
     const index = this.pending.findIndex(j => j.id === id);
     if (index >= 0) { const [job] = this.pending.splice(index, 1); job.reject(abortError()); }
+    this.notifyIdle();
   }
   clear() {
     for (const j of this.pending.splice(0)) j.reject(abortError());
     for (const j of this.active.values()) j.controller.abort();
     if (this.timer) clearTimeout(this.timer);
+    this.notifyIdle();
+  }
+  whenIdle(): Promise<void> {
+    if (!this.active.size && !this.pending.length) return Promise.resolve();
+    return new Promise(resolve => this.idleWaiters.add(resolve));
+  }
+  private notifyIdle() {
+    if (this.active.size || this.pending.length) return;
+    for (const resolve of this.idleWaiters) resolve();
+    this.idleWaiters.clear();
   }
   private pump() {
     if (!this.pending.length || this.active.size >= this.concurrency) return;
@@ -49,7 +61,7 @@ export class RequestQueue {
     Promise.resolve().then(() => {
       if (job.controller.signal.aborted) throw abortError();
       return job.run(job.controller.signal);
-    }).then(job.resolve, job.reject).finally(() => { this.active.delete(job.id); this.pump(); });
+    }).then(job.resolve, job.reject).finally(() => { this.active.delete(job.id); this.pump(); this.notifyIdle(); });
     this.pump();
   }
 }

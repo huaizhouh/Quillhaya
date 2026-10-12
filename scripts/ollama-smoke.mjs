@@ -14,12 +14,13 @@ const profile = settings.profiles.find(p => p.id === settings.defaultProfileId);
 assert(profile?.kind === 'ollama' && profile.auth === 'none', 'Select an unauthenticated local Ollama profile first.');
 assert(['localhost', '127.0.0.1', '[::1]'].includes(new URL(profile.baseUrl).hostname), 'This smoke check only sends to a loopback Ollama endpoint.');
 const directory = await mkdtemp(join(tmpdir(), 'twa-ollama-check-'));
+let provider;
 try {
   const bundle = await build({ stdin: { contents: "export * from './electron/llm/provider'; export * from './electron/llm/queue';", resolveDir: root }, bundle: true, write: false, platform: 'node', format: 'esm' });
   const modulePath = join(directory, 'provider.mjs'); await writeFile(modulePath, bundle.outputFiles[0].text);
   const { CompatibleProvider, connectionRequest, RequestQueue, serialKey } = await import(pathToFileURL(modulePath).href);
   const queue = new RequestQueue(); const started = Date.now(); let calls = 0; let active = 0; let peak = 0;
-  const provider = new CompatibleProvider(profile, undefined, async (...args) => { calls++; return fetch(...args); });
+  provider = new CompatibleProvider(profile, undefined, async (...args) => { calls++; return fetch(...args); });
   const cases = [
     { text: 'Learning takes practice.', status: 'good' },
     { text: 'He go to school every day.', status: 'needs_revision' },
@@ -45,4 +46,7 @@ try {
   for (const result of results) if (result.status === 'rejected') throw result.reason;
   assert.equal(peak, 1);
   console.log(`PASS: ${cases.length} real model reviews; peak concurrency ${peak}; HTTP attempts ${calls}; elapsed ${Date.now() - started} ms.`);
-} finally { await rm(directory, { recursive: true, force: true }); }
+} finally {
+  try { if (provider) await provider.release(); }
+  finally { await rm(directory, { recursive: true, force: true }); }
+}

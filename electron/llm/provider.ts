@@ -1,10 +1,12 @@
 import { ResultSchema, type AnalysisRequest, type AnalysisResult, type ModelProfile } from '../../src/models/schema';
 import { AppError, abortError, delay } from './errors';
 import { feedbackJsonSchema } from './response-schema';
+import { releaseOllama, type ReleaseStatus } from './ollama';
 
 export interface LLMProvider {
   analyze(request: AnalysisRequest, signal: AbortSignal): Promise<AnalysisResult>;
   testConnection(signal: AbortSignal): Promise<string>;
+  release?(): Promise<ReleaseStatus>;
 }
 // Future native Anthropic/Gemini adapters implement LLMProvider; no protocol guessing.
 const dimensions = {
@@ -75,6 +77,7 @@ export function connectionRequest(profileId: string): AnalysisRequest {
 export class CompatibleProvider implements LLMProvider {
   private format: 'schema' | 'json' | 'text' = 'schema';
   constructor(private profile: ModelProfile, private key: string | undefined, private fetcher: typeof fetch = fetch) {}
+  release() { return releaseOllama(this.profile, this.key, this.fetcher); }
   async testConnection(signal: AbortSignal) {
     await this.analyze(connectionRequest(this.profile.id), signal);
     return '连接成功，模型已返回有效的中文结构化反馈。';

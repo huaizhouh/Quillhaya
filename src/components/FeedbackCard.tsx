@@ -15,6 +15,7 @@ export function FeedbackCard({ entry, index, onAccept, onIgnore, onRetry, onLoca
   return <article className={`feedback-card ${status}`} data-testid="feedback-card">
     <div className="card-heading"><span className="card-status">{status === 'good' ? <Check size={14} /> : status === 'analyzing' ? <span className="spinner" /> : <span className="status-glyph">{status === 'needs_revision' ? '↗' : status === 'error' ? '!' : '·'}</span>}{title}</span><span className="sentence-index">{String(index + 1).padStart(2, '0')}</span></div>
     <button className="original-text" onClick={onLocate} title="定位到原句，不移动光标">{entry.text}<LocateFixed size={13} /></button>
+    {entry.contextChanged && <p className="context-notice">上下文已变化 · 保留此前反馈，可重新评估。</p>}
     {status === 'pending' && <p className="muted card-description">{entry.complete ? '完成句子后，反馈将在这里出现。' : '这一句尚未结束，不会被当作语法错误。'}</p>}
     {status === 'analyzing' && <p className="muted card-description">继续写，反馈正在路上。</p>}
     {status === 'queued' && <p className="muted card-description">等待可用的模型请求位置，尚未开始计算请求超时。</p>}
@@ -30,6 +31,7 @@ export function FeedbackCard({ entry, index, onAccept, onIgnore, onRetry, onLoca
         <button className={`detail-button ${expanded ? 'expanded' : ''}`} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>详情<ChevronDown size={13} /></button>
       </div>
     </>}
-    {entry.error && <><p className="card-description error-text">{entry.error.message}</p><button className="text-button" onClick={onRetry}><RotateCw size={13} />重试分析</button></>}
+    {entry.error && <p className="card-description error-text">{entry.error.message}</p>}
+    <button className="text-button reevaluate-button" disabled={Boolean(entry.requestId) || !entry.complete} onClick={onRetry}><RotateCw size={13} />{entry.error ? '重试分析' : '重新评估'}</button>
   </article>;
 }

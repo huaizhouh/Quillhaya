@@ -19,6 +19,8 @@
     "test:e2e": "npm run build && playwright test",
     "test:dev": "node scripts/dev-smoke.mjs",
     "test:ollama": "node scripts/ollama-smoke.mjs",
+    "test:ollama:lifecycle": "node scripts/ollama-lifecycle-smoke.mjs",
+    "test:ollama:close": "npm run build && node scripts/ollama-close-smoke.mjs",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

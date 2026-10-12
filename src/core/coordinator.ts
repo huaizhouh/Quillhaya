@@ -1,6 +1,6 @@
 import type { AnalysisProgress, AnalysisRequest, AnalysisResult, DesktopAPI, Failure, WritingMode } from '../models/schema';
 import { splitSentences, type Sentence } from './sentences';
-export type FeedbackEntry = Sentence & { signature: string; state: 'pending' | 'queued' | 'analyzing' | 'done' | 'error'; result?: AnalysisResult; error?: Failure; requestId?: string; ignored?: boolean };
+export type FeedbackEntry = Sentence & { signature: string; contextSignature?: string; reviewedContext?: string; contextChanged?: boolean; state: 'pending' | 'queued' | 'analyzing' | 'done' | 'error'; result?: AnalysisResult; error?: Failure; requestId?: string; ignored?: boolean };
 export type AnalysisContext = { documentId: string; revision: number; mode: WritingMode; task: string; profileId: string; configVersion: number };
 
 export class AnalysisCoordinator {
@@ -25,6 +25,12 @@ export class AnalysisCoordinator {
     if (this.disposed) return;
     const switched = this.context?.documentId !== context.documentId;
     if (switched) { this.cancelAll(); this.entries = []; this.cache.clear(); }
+    const previousText = switched ? '' : this.text;
+    // Only newly inserted sentence terminators qualify for the short trigger.
+    // An existing full stop at the end of a sentence does not end an edit in its middle.
+    let changedFrom = 0, oldEnd = previousText.length, changedTo = text.length;
+    while (changedFrom < oldEnd && changedFrom < changedTo && previousText[changedFrom] === text[changedFrom]) changedFrom++;
+    while (oldEnd > changedFrom && changedTo > changedFrom && previousText[oldEnd - 1] === text[changedTo - 1]) { oldEnd--; changedTo--; }
     this.context = context; this.text = text;
     const old = [...this.entries];
     const sentences = splitSentences(text);
@@ -32,23 +38,32 @@ export class AnalysisCoordinator {
       const found = old.findIndex(e => e.text === sentence.text);
       const previous = found >= 0 ? old.splice(found, 1)[0] : undefined;
       const before = sentences.slice(Math.max(0, index - 2), index).filter(s => s.complete).map(s => s.text.slice(0, 3000));
-      // Forward context is a request-time hint, not an automatic invalidation trigger.
-      // Continuing to write must not cancel or repeat a review of unchanged earlier text.
-      const signature = JSON.stringify([sentence.text, before, context.mode, context.task, context.profileId, context.configVersion]);
+      const after = sentences.slice(index + 1, index + 2).filter(s => s.complete).map(s => s.text.slice(0, 3000));
+      const contextSignature = JSON.stringify([before, after]);
+      // Neighbor edits mark existing reviews stale; only the current text or
+      // analysis settings invalidate the review itself. Refresh is explicit.
+      const signature = JSON.stringify([sentence.text, context.mode, context.task, context.profileId, context.configVersion]);
       const id = previous?.id ?? `s-${++this.counter}`;
-      if (previous?.signature === signature) return { ...previous, ...sentence, id };
+      if (previous?.signature === signature) return { ...previous, ...sentence, id, contextSignature, contextChanged: previous.reviewedContext !== undefined && previous.reviewedContext !== contextSignature };
       if (previous?.requestId) void this.api.cancel(previous.requestId);
-      const cached = this.cache.get(signature);
-      return { ...sentence, id, signature, ignored: previous?.ignored, state: cached ? 'done' : 'pending', result: cached ? { ...cached, sentence_id: id } : undefined };
+      const cached = this.cache.get(JSON.stringify([signature, contextSignature]));
+      return { ...sentence, id, signature, contextSignature, reviewedContext: cached ? contextSignature : undefined, contextChanged: false, ignored: previous?.ignored, state: cached ? 'done' : 'pending', result: cached ? { ...cached, sentence_id: id } : undefined };
     });
     for (const removed of old) if (removed.requestId) void this.api.cancel(removed.requestId);
     this.emit();
     this.clearTimers();
-    if (this.enabled && !composing) this.schedule();
+    const completed = this.entries.filter(entry => {
+      const ending = /[.!?]["'”’)]*$/.exec(entry.text);
+      const position = entry.from + (ending?.index ?? -1);
+      return entry.complete && ending && position >= changedFrom && position < changedTo;
+    }).map(entry => entry.id);
+    if (this.enabled && !composing) this.schedule(completed);
   }
-  private schedule() {
-    // Punctuation uses a short merge window; pause uses the configured debounce.
-    this.completionTimer = setTimeout(() => this.analyze(), 220);
+  private schedule(completed: string[] = []) {
+    // The short trigger cannot accidentally submit another sentence still being edited.
+    if (completed.length) this.completionTimer = setTimeout(() => {
+      for (const id of completed) if (this.get(id)?.state === 'pending') this.analyze(undefined, id);
+    }, 220);
     this.timer = setTimeout(() => this.analyze(), this.debounceMs);
   }
   analyze(range?: { from: number; to: number }, retryId?: string) {
@@ -66,6 +81,7 @@ export class AnalysisCoordinator {
     this.emit();
   }
   get(id: string) { return this.entries.find(e => e.id === id); }
+  stop() { this.clearTimers(); this.cancelAll(); this.emit(); }
   progress(progress: AnalysisProgress) {
     const entry = this.entries.find(e => e.requestId === progress.requestId);
     if (!entry || entry.ignored || this.disposed) return;
@@ -77,7 +93,8 @@ export class AnalysisCoordinator {
     const index = this.entries.indexOf(entry);
     const requestId = crypto.randomUUID();
     const signature = entry.signature;
-    entry.state = 'queued'; entry.requestId = requestId; entry.error = undefined; entry.result = undefined; this.emit();
+    const reviewedContext = entry.contextSignature;
+    entry.state = 'queued'; entry.requestId = requestId; entry.error = undefined; this.emit();
     const request: AnalysisRequest = {
       request_id: requestId, document_id: context.documentId, revision_id: context.revision,
       sentence_id: entry.id, original_text: entry.text, from: entry.from, to: entry.to,
@@ -94,14 +111,15 @@ export class AnalysisCoordinator {
     if (reply.ok) {
       if (reply.value.original_text !== current.text || reply.value.sentence_id !== current.id) return;
       current.result = reply.value; current.state = 'done';
-      this.cache.set(signature, reply.value);
+      current.reviewedContext = reviewedContext; current.contextChanged = current.contextSignature !== reviewedContext;
+      this.cache.set(JSON.stringify([signature, reviewedContext]), reply.value);
       if (this.cache.size > 300) this.cache.delete(this.cache.keys().next().value!);
-    } else if (reply.error.code === 'cancelled') current.state = 'pending';
+    } else if (reply.error.code === 'cancelled') current.state = current.result ? 'done' : 'pending';
     else { current.state = 'error'; current.error = reply.error; }
     this.emit();
   }
   private cancelAll() {
-    for (const e of this.entries) if (e.requestId) { void this.api.cancel(e.requestId); e.requestId = undefined; e.state = 'pending'; }
+    for (const e of this.entries) if (e.requestId) { void this.api.cancel(e.requestId); e.requestId = undefined; e.state = e.result ? 'done' : 'pending'; }
   }
   private emit() { if (!this.disposed) this.publish(this.entries.map(e => ({ ...e }))); }
   private clearTimers() { clearTimeout(this.timer); clearTimeout(this.completionTimer); }

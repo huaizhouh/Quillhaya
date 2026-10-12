@@ -6,12 +6,16 @@ import { markdown } from '@codemirror/lang-markdown';
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { checkedReplacement } from '../core/sentences';
 
-const setProblems = StateEffect.define<{ from: number; to: number }[]>();
+export type ProblemMark = { from: number; to: number; severity: 'error' | 'improvement' };
+const setProblems = StateEffect.define<ProblemMark[]>();
 const problems = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(value, tr) {
     value = value.map(tr.changes);
-    for (const effect of tr.effects) if (effect.is(setProblems)) value = Decoration.set(effect.value.filter(r => r.from >= 0 && r.to <= tr.newDoc.length && r.to > r.from).map(r => Decoration.mark({ class: 'sentence-problem' }).range(r.from, r.to)), true);
+    for (const effect of tr.effects) if (effect.is(setProblems)) value = Decoration.set(effect.value.filter(r => r.from >= 0 && r.to <= tr.newDoc.length && r.to > r.from).map(r => Decoration.mark({
+      class: `sentence-problem sentence-${r.severity}`,
+      attributes: { title: r.severity === 'error' ? '客观错误 · 建议修改' : '可选优化 · 可按需采纳', 'data-severity': r.severity }
+    }).range(r.from, r.to)), true);
     return value;
   },
   provide: field => EditorView.decorations.from(field)
@@ -23,7 +27,7 @@ export interface EditorHandle {
   locate(from: number, to: number): void;
   focus(): void;
 }
-type Props = { documentId: string; initialText: string; marks: { from: number; to: number }[]; onChange: (text: string, composing: boolean) => void; onComposition: (composing: boolean) => void };
+type Props = { documentId: string; initialText: string; marks: ProblemMark[]; onChange: (text: string, composing: boolean) => void; onComposition: (composing: boolean) => void };
 export const WritingEditor = forwardRef<EditorHandle, Props>(function WritingEditor(props, ref) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);

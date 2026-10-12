@@ -80,7 +80,7 @@ test('appending a complete sentence and changing appearance retain completed fee
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await expect(page.getByTestId('feedback-card').first()).toContainText('表达良好');
   const states = await page.evaluate(() => (window as unknown as { feedbackStates: string[] }).feedbackStates);
-  expect(states.every(s => s === '表达良好')).toBe(true);
+  expect(states).toEqual(states.map(() => '表达良好'));
 });
 
 test('a failed renderer can save its last snapshot and quit without a menu listener', async () => {
@@ -309,4 +309,128 @@ test('Ollama reviews appear queued until their actual HTTP request starts', asyn
     await expect(page.getByTestId('feedback-card').nth(1)).toContainText('表达良好');
     expect(received).toEqual(['Learning takes practice.', 'Practice helps us improve.']);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test('issue1012: settings headings stay horizontal and task height uses an accessible drag handle', async () => {
+  await page.getByRole('button', { name: '打开设置' }).click();
+  await page.getByLabel('Provider', { exact: true }).selectOption('ollama');
+  const heading = page.locator('.section-label').filter({ hasText: '编辑与外观' });
+  await heading.scrollIntoViewIfNeeded();
+  const bounds = await heading.evaluate(el => {
+    const node = el.firstChild!, range = document.createRange();
+    range.setStart(node, 0); range.setEnd(node, 1); const first = range.getBoundingClientRect();
+    range.setStart(node, node.textContent!.length - 1); range.setEnd(node, node.textContent!.length); const last = range.getBoundingClientRect();
+    return { first: first.top, last: last.top, width: el.getBoundingClientRect().width };
+  });
+  expect(Math.abs(bounds.last - bounds.first)).toBeLessThan(2); expect(bounds.width).toBeGreaterThan(250);
+  await page.screenshot({ path: 'docs/issue1012-settings.png' });
+  await page.getByRole('button', { name: '关闭设置' }).click();
+  await page.getByRole('button', { name: /写作题目与情境/ }).click();
+  const input = page.getByRole('textbox', { name: '写作题目与情境' });
+  await expect(input).toHaveCSS('resize', 'none');
+  const handle = page.getByRole('separator', { name: '调整题目区域高度' });
+  await handle.focus(); await page.keyboard.press('ArrowDown'); await expect(handle).toHaveAttribute('aria-valuenow', '112');
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 35); await page.mouse.up();
+  await expect(handle).toHaveAttribute('aria-valuenow', '147');
+});
+
+test('issue1012: timer pauses, resumes and resets independently of typing', async () => {
+  await write('I am writing');
+  const timer = page.getByTestId('writing-timer'); await expect(timer).not.toHaveText('00:00');
+  await page.getByRole('button', { name: '暂停计时', exact: true }).click();
+  const frozen = await timer.textContent(); await write('I keep writing while paused');
+  await expect(page.getByRole('button', { name: '开始或继续计时' })).toBeVisible(); await expect(timer).toHaveText(frozen!);
+  await page.getByRole('button', { name: '开始或继续计时' }).click();
+  await expect(page.getByRole('button', { name: '暂停计时', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '复位计时' }).click();
+  await expect(timer).toHaveText('00:00'); await expect(page.getByRole('button', { name: '开始或继续计时' })).toBeVisible();
+});
+
+test('issue1012: accepting one correction keeps neighboring feedback until manual reevaluation', async () => {
+  await write('I am agree with you. Practice helps us improve.');
+  const cards = page.getByTestId('feedback-card');
+  await expect(cards.nth(0)).toContainText('建议修改'); await expect(cards.nth(1)).toContainText('表达良好');
+  await cards.nth(0).getByRole('button', { name: '接受修改', exact: true }).click();
+  await expect(cards.nth(1)).toContainText('上下文已变化'); await expect(cards.nth(1).locator('.card-status')).toHaveText('表达良好');
+  await expect(page.getByTestId('writing-editor')).toBeFocused();
+  await page.getByRole('button', { name: /写作题目与情境/ }).click();
+  await page.getByRole('button', { name: '暂停计时', exact: true }).click();
+  await expect(cards.nth(0)).toContainText('表达良好');
+  await page.screenshot({ path: 'docs/issue1012-workspace.png' });
+  await cards.nth(1).getByRole('button', { name: '重新评估', exact: true }).click();
+  await expect(cards.nth(1)).toContainText('表达良好'); // The earlier explanation stays visible during refresh.
+  await expect(cards.nth(1)).not.toContainText('上下文已变化'); await expect(cards.nth(1).locator('.card-status')).toHaveText('表达良好');
+});
+
+async function modelTestServer(hold: (model: string, sentenceId: string) => boolean) {
+  const requests: { path: string; model: string; sentenceId?: string }[] = [];
+  const server = createServer((req, res) => {
+    let raw = ''; req.on('data', chunk => { raw += chunk; }); req.on('end', () => {
+      const body = JSON.parse(raw), input = body.messages ? JSON.parse(body.messages[1].content) : undefined;
+      requests.push({ path: req.url!, model: body.model, sentenceId: input?.sentence_id });
+      if (req.url === '/api/generate') {
+        expect(body).toEqual({ model: body.model, keep_alive: 0, stream: false });
+        res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ done: true, done_reason: 'unload' })); return;
+      }
+      if (hold(body.model, input.sentence_id)) return;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ sentence_id: input.sentence_id, original_text: input.original_text, status: 'good', overall_explanation_zh: '表达良好，无需修改。', suggested_revision: null, issues: [], confidence: 0.9 }) } }] }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  const saved = await page.evaluate(async port => {
+    const boot = await window.desktop.bootstrap(); if (!boot.ok) throw Error('bootstrap');
+    const profiles = ['background', 'selected', 'untouched'].map(id => ({ ...boot.value.settings.profiles[0], id, name: id, kind: 'ollama' as const, model: id, baseUrl: `http://127.0.0.1:${port}/v1` }));
+    return window.desktop.saveSettings({ ...boot.value.settings, profiles, defaultProfileId: 'background' }, {});
+  }, port);
+  expect(saved.ok).toBe(true); await page.reload(); await expect(page.getByTestId('writing-editor')).toBeVisible();
+  return { requests, close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
+}
+
+test('issue1012: connection test targets only the selected profile and unloads it after success', async () => {
+  const server = await modelTestServer(model => model === 'background');
+  try {
+    await write('Learning takes practice. Practice helps us improve.');
+    await expect.poll(() => server.requests.length).toBe(1);
+    await page.getByRole('button', { name: '打开设置' }).click();
+    await page.getByRole('button', { name: 'selected', exact: true }).click();
+    await page.getByRole('button', { name: '测试连接', exact: true }).click();
+    await expect(page.getByRole('dialog')).toContainText('测试模型已从 Ollama 内存中释放');
+    expect(server.requests.filter(r => r.sentenceId === 'connection-test').map(r => r.model)).toEqual(['selected']);
+    expect(server.requests.filter(r => r.path === '/api/generate').map(r => r.model)).toEqual(['selected']);
+    expect(server.requests.filter(r => r.model === 'background')).toHaveLength(1); expect(server.requests.some(r => r.model === 'untouched')).toBe(false);
+  } finally { await server.close(); }
+});
+
+test('issue1012: cancelling a connection test unlocks settings after unloading its model', async () => {
+  const server = await modelTestServer(() => true);
+  try {
+    await page.getByRole('button', { name: '打开设置' }).click(); await page.getByRole('button', { name: 'selected', exact: true }).click();
+    await page.getByRole('button', { name: '测试连接', exact: true }).click();
+    await expect.poll(() => server.requests.length).toBe(1);
+    await expect(page.getByRole('button', { name: 'untouched', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: '取消测试', exact: true }).click();
+    await expect(page.getByRole('dialog')).toContainText('分析已取消');
+    await expect(page.getByRole('button', { name: '测试连接', exact: true })).toBeEnabled();
+    expect(server.requests.map(r => [r.path, r.model])).toEqual([['/v1/chat/completions', 'selected'], ['/api/generate', 'selected']]);
+  } finally { await server.close(); }
+});
+
+test('issue1012: stop cancels active and queued inference, unloads and prevents automatic reload', async () => {
+  const server = await modelTestServer(() => true);
+  try {
+    await write('Learning takes practice. Practice helps us improve.');
+    await expect(page.getByTestId('feedback-card').nth(1)).toContainText('排队中');
+    await expect.poll(() => server.requests.length).toBe(1);
+    await page.getByRole('button', { name: '停止并释放模型', exact: true }).click();
+    await expect(page.locator('.toast')).toContainText('已停止请求并释放模型：background');
+    await expect(page.getByRole('button', { name: '恢复自动分析' })).toBeVisible();
+    await write('Learning takes practice. Practice helps us improve. We can continue writing.');
+    await expect(page.locator('.draft-status')).toContainText('草稿已自动保存');
+    expect(server.requests.map(r => [r.path, r.model])).toEqual([['/v1/chat/completions', 'background'], ['/api/generate', 'background']]);
+    await expect(page.getByTestId('writing-editor')).toBeFocused();
+  } finally { await server.close(); }
 });

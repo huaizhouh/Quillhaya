@@ -25,7 +25,7 @@ describe('non-blocking coordinator', () => {
   });
   it('drops stale results when a sentence changes', async () => {
     const t = setup(); t.engine.update('He go home.', context); await vi.advanceTimersByTimeAsync(220);
-    t.engine.update('He goes home.', { ...context, revision: 2 }); await vi.advanceTimersByTimeAsync(220);
+    t.engine.update('He goes home.', { ...context, revision: 2 }); await vi.advanceTimersByTimeAsync(1200);
     t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
     expect(t.entries[0].text).toBe('He goes home.'); expect(t.entries[0].result).toBeUndefined(); expect(t.api.cancel).toHaveBeenCalled();
     t.requests[1].d.resolve({ ok: true, value: good(t.requests[1].r) }); await vi.advanceTimersByTimeAsync(0);
@@ -54,13 +54,38 @@ describe('non-blocking coordinator', () => {
     t.engine.progress({ requestId: t.requests[0].r.request_id, phase: 'running' });
     expect(t.entries[0].state).toBe('done'); t.engine.dispose();
   });
-  it('rechecks changed preceding context and allows an explicit selected-text review', async () => {
+  it('retains neighbor feedback until an explicit refresh, using the latest context', async () => {
     const t = setup(); t.engine.update('We learn. Practice helps.', context); await vi.advanceTimersByTimeAsync(220);
     for (const item of t.requests) item.d.resolve({ ok: true, value: good(item.r) }); await vi.advanceTimersByTimeAsync(0);
     t.engine.analyze({ from: 0, to: 9 });
     expect(t.api.analyze).toHaveBeenCalledTimes(3);
+    t.engine.update('We teach. Practice helps.', { ...context, revision: 2 }); await vi.advanceTimersByTimeAsync(1200);
+    expect(t.requests.slice(3).map(({ r }) => r.original_text)).toEqual(['We teach.']);
+    expect(t.entries[1]).toMatchObject({ state: 'done', contextChanged: true, result: { status: 'good' } });
+    t.engine.analyze(undefined, t.entries[1].id);
+    expect(t.requests[4].r.context.before).toEqual(['We teach.']);
+    expect(t.entries[1].result?.status).toBe('good');
+    t.requests[4].d.resolve({ ok: true, value: good(t.requests[4].r) }); await vi.advanceTimersByTimeAsync(0);
+    expect(t.entries[1]).toMatchObject({ state: 'done', contextChanged: false }); t.engine.dispose();
+  });
+  it('marks an in-flight review stale if neighbors change, and clears the mark on undo', async () => {
+    const t = setup(); t.engine.update('We learn. Practice helps.', context); await vi.advanceTimersByTimeAsync(220);
+    const second = t.requests[1];
     t.engine.update('We teach. Practice helps.', { ...context, revision: 2 }); await vi.advanceTimersByTimeAsync(220);
-    expect(t.requests.slice(3).map(({ r }) => r.original_text)).toEqual(['We teach.', 'Practice helps.']); t.engine.dispose();
+    expect(t.api.cancel).not.toHaveBeenCalledWith(second.r.request_id);
+    second.d.resolve({ ok: true, value: good(second.r) }); await vi.advanceTimersByTimeAsync(0);
+    expect(t.entries[1]).toMatchObject({ state: 'done', contextChanged: true });
+    t.engine.update('We learn. Practice helps.', { ...context, revision: 3 });
+    expect(t.entries[1]).toMatchObject({ state: 'done', contextChanged: false }); t.engine.dispose();
+  });
+  it('retains the old review when a manual refresh fails or is stopped', async () => {
+    const t = setup(); t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);
+    t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
+    t.engine.analyze(undefined, t.entries[0].id);
+    t.requests[1].d.resolve({ ok: false, error: { code: 'network', message: '网络错误', retryable: true } }); await vi.advanceTimersByTimeAsync(0);
+    expect(t.entries[0]).toMatchObject({ state: 'error', result: { status: 'good' } });
+    t.engine.analyze(undefined, t.entries[0].id); t.engine.configure(false, 1200);
+    expect(t.entries[0]).toMatchObject({ state: 'done', result: { status: 'good' } }); t.engine.dispose();
   });
   it('does not allow a prior document to pollute another document', async () => {
     const t = setup(); t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);
@@ -77,14 +102,42 @@ describe('non-blocking coordinator', () => {
   it('invalidates cached results after meaningful context changes', async () => {
     const t = setup(); t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);
     t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
-    t.engine.update('We learn.', { ...context, task: 'New task' }); await vi.advanceTimersByTimeAsync(220);
+    t.engine.update('We learn.', { ...context, task: 'New task' }); await vi.advanceTimersByTimeAsync(1200);
     expect(t.api.analyze).toHaveBeenCalledTimes(2); t.engine.dispose();
   });
   it('skips incomplete prose and IME composition, resumes after compositionend', async () => {
     const t = setup(); t.engine.update('I think that', context); await vi.advanceTimersByTimeAsync(2000);
     expect(t.api.analyze).not.toHaveBeenCalled();
     t.engine.update('We learn.', context, true); await vi.advanceTimersByTimeAsync(2000); expect(t.api.analyze).not.toHaveBeenCalled();
-    t.engine.update('We learn.', context, false); await vi.advanceTimersByTimeAsync(220); expect(t.api.analyze).toHaveBeenCalledTimes(1); t.engine.dispose();
+    t.engine.update('We learn.', context, false); await vi.advanceTimersByTimeAsync(1200); expect(t.api.analyze).toHaveBeenCalledTimes(1); t.engine.dispose();
+  });
+  it('waits for the full idle delay while editing a sentence with an existing period', async () => {
+    const t = setup(); t.engine.configure(true, 1600);
+    t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);
+    t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
+    for (const text of ['We learn a.', 'We learn a lot.', 'We learn a lot together.']) {
+      t.engine.update(text, { ...context, revision: ++context.revision });
+      await vi.advanceTimersByTimeAsync(500);
+      expect(t.requests).toHaveLength(1);
+    }
+    await vi.advanceTimersByTimeAsync(1099); expect(t.requests).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(t.requests.map(item => item.r.original_text)).toEqual(['We learn.', 'We learn a lot together.']); t.engine.dispose();
+  });
+  it('a newly completed sentence does not prematurely submit another edited sentence', async () => {
+    const t = setup(); t.engine.update('We learn. We practice', context); await vi.advanceTimersByTimeAsync(220);
+    t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
+    t.engine.update('We learn together. We practice', { ...context, revision: 2 }); await vi.advanceTimersByTimeAsync(300);
+    t.engine.update('We learn together. We practice.', { ...context, revision: 3 }); await vi.advanceTimersByTimeAsync(220);
+    expect(t.requests.map(item => item.r.original_text)).toEqual(['We learn.', 'We practice.']);
+    await vi.advanceTimersByTimeAsync(980); expect(t.requests[2].r.original_text).toBe('We learn together.'); t.engine.dispose();
+  });
+  it('manual reevaluation can submit an edited sentence before its idle delay', async () => {
+    const t = setup(); t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);
+    t.engine.update('We learn more.', { ...context, revision: 2 });
+    expect(t.api.cancel).toHaveBeenCalledWith(t.requests[0].r.request_id);
+    t.engine.analyze(undefined, t.entries[0].id);
+    expect(t.requests[1].r.original_text).toBe('We learn more.'); t.engine.dispose();
   });
   it('allows manual analysis while paused and retries failures without blocking edits', async () => {
     const t = setup(); t.engine.configure(false, 1200); t.engine.update('I think', context); await vi.advanceTimersByTimeAsync(2000);

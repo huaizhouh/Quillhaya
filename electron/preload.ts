@@ -4,7 +4,8 @@ import type { AnalysisProgress, DesktopAPI, MenuCommand } from '../src/models/sc
 const api: DesktopAPI = {
   bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
   saveSettings: (settings, keys) => ipcRenderer.invoke('settings:save', { settings, keys }),
-  testConnection: (profile, key) => ipcRenderer.invoke('llm:test', { profile, key }),
+  testConnection: (profile, key, requestId) => ipcRenderer.invoke('llm:test', { profile, key, requestId }),
+  stopModels: (profile, key) => ipcRenderer.invoke('llm:stop', { profile, key }),
   analyze: request => ipcRenderer.invoke('llm:analyze', request),
   cancel: requestId => ipcRenderer.invoke('llm:cancel', requestId),
   draft: document => ipcRenderer.invoke('document:draft', document),
