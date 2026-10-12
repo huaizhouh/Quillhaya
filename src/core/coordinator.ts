@@ -1,6 +1,6 @@
-import type { AnalysisRequest, AnalysisResult, DesktopAPI, Failure, WritingMode } from '../models/schema';
+import type { AnalysisProgress, AnalysisRequest, AnalysisResult, DesktopAPI, Failure, WritingMode } from '../models/schema';
 import { splitSentences, type Sentence } from './sentences';
-export type FeedbackEntry = Sentence & { signature: string; state: 'pending' | 'analyzing' | 'done' | 'error'; result?: AnalysisResult; error?: Failure; requestId?: string; ignored?: boolean };
+export type FeedbackEntry = Sentence & { signature: string; state: 'pending' | 'queued' | 'analyzing' | 'done' | 'error'; result?: AnalysisResult; error?: Failure; requestId?: string; ignored?: boolean };
 export type AnalysisContext = { documentId: string; revision: number; mode: WritingMode; task: string; profileId: string; configVersion: number };
 
 export class AnalysisCoordinator {
@@ -32,8 +32,9 @@ export class AnalysisCoordinator {
       const found = old.findIndex(e => e.text === sentence.text);
       const previous = found >= 0 ? old.splice(found, 1)[0] : undefined;
       const before = sentences.slice(Math.max(0, index - 2), index).filter(s => s.complete).map(s => s.text.slice(0, 3000));
-      const after = sentences.slice(index + 1, index + 2).filter(s => s.complete).map(s => s.text.slice(0, 3000));
-      const signature = JSON.stringify([sentence.text, before, after, context.mode, context.task, context.profileId, context.configVersion]);
+      // Forward context is a request-time hint, not an automatic invalidation trigger.
+      // Continuing to write must not cancel or repeat a review of unchanged earlier text.
+      const signature = JSON.stringify([sentence.text, before, context.mode, context.task, context.profileId, context.configVersion]);
       const id = previous?.id ?? `s-${++this.counter}`;
       if (previous?.signature === signature) return { ...previous, ...sentence, id };
       if (previous?.requestId) void this.api.cancel(previous.requestId);
@@ -52,10 +53,10 @@ export class AnalysisCoordinator {
   }
   analyze(range?: { from: number; to: number }, retryId?: string) {
     for (const e of this.entries) {
-      if (e.ignored || (!e.complete && !range) || e.state === 'analyzing') continue;
+      if (e.ignored || (!e.complete && !range) || e.requestId) continue;
       if (retryId && e.id !== retryId) continue;
       if (range && (e.to <= range.from || e.from >= range.to)) continue;
-      if (e.state !== 'pending' && !retryId) continue;
+      if (e.state !== 'pending' && !retryId && !range) continue;
       void this.run(e);
     }
   }
@@ -65,12 +66,18 @@ export class AnalysisCoordinator {
     this.emit();
   }
   get(id: string) { return this.entries.find(e => e.id === id); }
+  progress(progress: AnalysisProgress) {
+    const entry = this.entries.find(e => e.requestId === progress.requestId);
+    if (!entry || entry.ignored || this.disposed) return;
+    entry.state = progress.phase === 'running' ? 'analyzing' : 'queued';
+    this.emit();
+  }
   private async run(entry: FeedbackEntry) {
     const context = this.context!;
     const index = this.entries.indexOf(entry);
     const requestId = crypto.randomUUID();
     const signature = entry.signature;
-    entry.state = 'analyzing'; entry.requestId = requestId; entry.error = undefined; this.emit();
+    entry.state = 'queued'; entry.requestId = requestId; entry.error = undefined; entry.result = undefined; this.emit();
     const request: AnalysisRequest = {
       request_id: requestId, document_id: context.documentId, revision_id: context.revision,
       sentence_id: entry.id, original_text: entry.text, from: entry.from, to: entry.to,

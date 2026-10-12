@@ -36,10 +36,28 @@ describe('OpenAI-compatible provider', () => {
     expect(options.headers.Authorization).toBe('Bearer unit-test-placeholder'); expect(options.redirect).toBe('error');
     expect(options.body).not.toContain(r.document_id); expect(options.body).not.toContain('unit-test-placeholder');
   });
-  it('falls back without response_format when a server rejects JSON mode', async () => {
-    const fetcher = vi.fn().mockResolvedValueOnce(new Response('response_format not supported', { status: 400 })).mockResolvedValueOnce(response());
-    await new CompatibleProvider(testProfile, undefined, fetcher).analyze(r, signal());
-    expect(fetcher).toHaveBeenCalledTimes(2); expect(JSON.parse(fetcher.mock.calls[1][1].body)).not.toHaveProperty('response_format');
+  it('falls back from schema to JSON to text and remembers endpoint compatibility', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response('response_format not supported', { status: 400 })).mockResolvedValueOnce(new Response('json_object not supported', { status: 422 })).mockImplementation(async () => response());
+    const provider = new CompatibleProvider(testProfile, undefined, fetcher);
+    await provider.analyze(r, signal()); await provider.analyze(r, signal());
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).response_format).toMatchObject({ type: 'json_schema', json_schema: { strict: true, schema: { additionalProperties: false } } });
+    expect(JSON.parse(fetcher.mock.calls[1][1].body).response_format).toEqual({ type: 'json_object' });
+    expect(JSON.parse(fetcher.mock.calls[2][1].body)).not.toHaveProperty('response_format');
+    expect(JSON.parse(fetcher.mock.calls[3][1].body)).not.toHaveProperty('response_format');
+  });
+  it.each([{ confidence: '0.8' }, { overall_explanation_zh: 'Looks good.' }, { issues: null }])('repairs invalid fields using the actual error and previous response: %s', async patch => {
+    const invalid = JSON.stringify({ ...good(r), ...patch });
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: invalid } }] }))).mockResolvedValueOnce(response());
+    expect((await new CompatibleProvider(testProfile, undefined, fetcher).analyze(r, signal())).status).toBe('good');
+    const messages = JSON.parse(fetcher.mock.calls[1][1].body).messages;
+    expect(messages[2]).toEqual({ role: 'assistant', content: invalid });
+    expect(messages[3].content).toContain(Object.keys(patch)[0]); expect(messages[3].content).toContain('必须使用中文');
+  });
+  it('reports the specific invalid field after the bounded repair still fails', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ ...good(r), confidence: 'high' }) } }] })));
+    await expect(new CompatibleProvider(testProfile, undefined, fetcher).analyze(r, signal())).rejects.toThrow('confidence：字段缺失或类型错误');
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
   it('attempts only one repair of an invalid model response', async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ choices: [{ message: { content: 'not json' } }] }))));

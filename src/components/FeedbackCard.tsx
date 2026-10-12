@@ -9,14 +9,15 @@ export function FeedbackCard({ entry, index, onAccept, onIgnore, onRetry, onLoca
 }) {
   const [expanded, setExpanded] = useState(false);
   const r = entry.result;
-  const status = entry.state === 'error' ? 'error' : entry.state === 'analyzing' ? 'analyzing' : r?.status ?? 'pending';
-  const title = ({ good: '表达良好', needs_revision: '建议修改', incomplete: '等待句子完成', error: '分析失败', analyzing: '分析中', pending: entry.complete ? '待分析' : '继续写作' })[status];
+  const status = entry.state === 'error' ? 'error' : entry.state === 'analyzing' ? 'analyzing' : entry.state === 'queued' ? 'queued' : r?.status ?? 'pending';
+  const title = ({ good: '表达良好', needs_revision: '建议修改', incomplete: '等待句子完成', error: '分析失败', analyzing: '分析中', queued: '排队中', pending: entry.complete ? '待分析' : '继续写作' })[status];
   const strength = r?.issues.some(i => i.severity === 'error') ? '客观错误' : '可选优化';
   return <article className={`feedback-card ${status}`} data-testid="feedback-card">
     <div className="card-heading"><span className="card-status">{status === 'good' ? <Check size={14} /> : status === 'analyzing' ? <span className="spinner" /> : <span className="status-glyph">{status === 'needs_revision' ? '↗' : status === 'error' ? '!' : '·'}</span>}{title}</span><span className="sentence-index">{String(index + 1).padStart(2, '0')}</span></div>
     <button className="original-text" onClick={onLocate} title="定位到原句，不移动光标">{entry.text}<LocateFixed size={13} /></button>
     {status === 'pending' && <p className="muted card-description">{entry.complete ? '完成句子后，反馈将在这里出现。' : '这一句尚未结束，不会被当作语法错误。'}</p>}
     {status === 'analyzing' && <p className="muted card-description">继续写，反馈正在路上。</p>}
+    {status === 'queued' && <p className="muted card-description">等待可用的模型请求位置，尚未开始计算请求超时。</p>}
     {r && <>
       {r.issues.length > 0 && <div className="issue-tags"><span>{labels[r.issues[0].type]}</span><span>{strength}</span></div>}
       {r.suggested_revision && <div className="suggestion"><span className="eyebrow">推荐表达</span><p lang="en">{r.suggested_revision}</p></div>}

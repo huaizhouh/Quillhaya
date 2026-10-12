@@ -61,7 +61,9 @@ Learning takes practice.
 
 这些都是可编辑示例，模型名与端口应以你实际运行的服务为准。应用向 Base URL 后追加 `/chat/completions`，**不要把这个后缀重复填入 Base URL**。模型 ID 始终允许手动输入，不依赖 `/models`。
 
-请求优先使用 `response_format: {type: "json_object"}`。端点明确报告不支持此格式时，自动退回提示词约束的文本 JSON。所有结果仍经严格 Zod 校验：字段、状态、中文说明、原文与句子 ID、可验证片段、建议数量等。无效响应最多修复一次；429/部分 5xx/连接失败最多重试两次；超时、取消和认证失败有独立中文提示。
+请求优先使用完整 `json_schema` 约束输出；端点明确报告不支持时，依次回退到 `json_object`、提示词约束的文本 JSON。所有结果仍经严格 Zod 校验：字段、状态、中文说明、原文与句子 ID、可验证片段、建议数量等。无效响应最多按具体字段错误修复一次；429/部分 5xx/连接失败最多重试两次；超时、取消和认证失败有独立中文提示。
+
+同一 Ollama 服务逐条分析，后续句子显示“排队中”，应用内排队不消耗请求超时；开始 HTTP 请求后才显示“分析中”并计时。模型加载、服务端内部等待与生成仍计入超时。全局最多两个并发请求，不同服务可并行。
 
 Temperature 留空时不发送该参数。附加 Headers 仅用于非密钥信息（例如 OpenRouter 的 `HTTP-Referer`、`X-Title`）；认证凭据请使用 API Key 字段和认证方式。
 
@@ -120,7 +122,7 @@ CodeMirror → AnalysisCoordinator → 白名单 preload IPC
 
 分句使用保守规则，保留原始 UTF-16 字符偏移，识别常见缩写、首字母缩写、小数和换行；排除 Markdown 标题、列表标记、代码块、行内代码和 URL。完整句号/问号/感叹号触发 220 ms 合并窗口，停顿触发默认 1200 ms 去抖。明显未完成的句子自动跳过，选区可主动分析。
 
-编辑时重新计算句子与上下文签名，只提交变化或缺少结果的句子。内存缓存最多 300 条；上下文、模式、题目或模型配置改变时重新核验。句子内容未变但位置移动可安全复用。请求携带 `document_id`、`revision_id`、`sentence_id`、请求 UUID 和本地范围；返回时除文档与签名外，还核对当前原文和请求令牌。因此旧请求即使无法及时取消，也不会污染新文档或变化后的句子。
+编辑时重新计算句子与前文签名，只提交变化或缺少结果的句子。追加或修改后一句不会重新审议前一句；前两句、当前句、模式、题目或当前模型配置改变时重新核验，外观设置不会触发重复分析。需要结合新后文重新审议时，可手动选择该句分析。内存缓存最多 300 条，句子内容未变但位置移动可安全复用。请求携带 `document_id`、`revision_id`、`sentence_id`、请求 UUID 和本地范围；返回时除文档与签名外，还核对当前原文和请求令牌。因此旧请求即使无法及时取消，也不会污染新文档或变化后的句子。
 
 本项目采用 **Electron + React + TypeScript + Zod**，全部应用逻辑在 Node.js/TypeScript 中完成，没有 Python 后端。Provider 接口预留原生 Anthropic/Gemini 适配位置，首版不实现这两种协议。详细实现与代码审阅入口见 [技术实现说明](docs/IMPLEMENTATION.md)。
 
@@ -173,6 +175,8 @@ E2E 使用下载的 Electron 自身，不需要另外下载 Playwright Chromium�
 
 实际执行结果和测试环境见 [验收记录](docs/VALIDATION.md)。
 
+已配置并运行本地 Ollama 时，可选执行 `npm run test:ollama`。该检查只读取当前模型设置，向本机端点发送四个固定测试句，验证中文结构化反馈与串行排队；不会读取作文、凭据或修改设置。四项问题的具体根因与实现见 [修复说明](docs/FIXES-2026-10-12.md)。
+
 ## 故障排查
 
 - **Node 版本错误 / Rosetta 混用**：激活 Conda 后运行 `node -p 'process.version + " " + process.arch'`，应为 Node 22.12+、`arm64`。在原生 arm64 终端安装环境。
@@ -189,7 +193,7 @@ E2E 使用下载的 Electron 自身，不需要另外下载 Playwright Chromium�
 
 ## 首版边界
 
-- 未用真实 OpenAI/OpenRouter 账户或实际 Ollama/LM Studio/vLLM/llama.cpp 模型逐一联调；统一兼容协议已通过 Mock fetch 和真实本地 HTTP 测试。实际模型能力、参数支持与反馈质量由服务决定。
+- 已完成本地 Ollama `gemma3:12b` 真实联调，并通过 Mock fetch 和本地 HTTP 兼容测试；其他具体模型与真实云端账户未逐一实测。实际模型能力、参数支持与反馈质量由服务决定。
 - 不提供官方 TOEFL 分数，不自动代写全文。
 - 未实现 Markdown 渲染预览、模型列表自动发现和 Anthropic/Gemini 原生协议；编辑器本身有 Markdown 语法高亮。
 - 保守分句不覆盖所有英语语言现象；包含行内代码或 URL 的整句会被跳过。跨行未结束的句子暂按不完整片段处理。自动分句缓存、忽略状态及计时器只在本次会话中有效。
@@ -199,6 +203,7 @@ E2E 使用下载的 Electron 自身，不需要另外下载 Playwright Chromium�
 
 ## 参考文档
 
+- [Ollama 结构化输出](https://docs.ollama.com/capabilities/structured-outputs)：兼容 API 的 `response_format` 支持 JSON Schema 约束，结果仍需客户端校验。
 - [OpenAI 官方 Structured Outputs / JSON mode](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=chat)：JSON mode 不保证字段符合 schema，因此客户端始终自行严格校验。
 - [Electron safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage)：macOS 加密密钥由 Keychain 保护。
 - [Electron 安全指南](https://www.electronjs.org/docs/latest/tutorial/security)：隔离、沙箱、导航和 IPC 边界。

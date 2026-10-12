@@ -38,6 +38,60 @@ test('real sandboxed Electron window, native menus and isolated API', async () =
   expect(invalid.ok).toBe(false);
 });
 
+test('adding, switching, deleting and saving model drafts does not crash or lose headers', async () => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.getByRole('button', { name: '打开设置' }).click();
+  await page.getByRole('button', { name: '添加模型', exact: true }).click();
+  await page.getByLabel('配置名称').fill('Local review');
+  await page.getByLabel('Provider', { exact: true }).selectOption('ollama');
+  await page.getByLabel('配置名称').fill('Local review');
+  await page.getByLabel('Model', { exact: true }).fill('gemma3:12b');
+  await page.locator('summary').filter({ hasText: '附加 Headers' }).click();
+  await page.getByLabel('JSON 对象').fill('{"X-Review":"saved-draft"}');
+  await page.getByRole('button', { name: '添加模型', exact: true }).click();
+  await page.getByRole('button', { name: '删除配置', exact: true }).click();
+  await page.getByRole('button', { name: 'Local review', exact: true }).click();
+  await expect(page.getByLabel('Model', { exact: true })).toHaveValue('gemma3:12b');
+  await expect(page.getByLabel('JSON 对象')).toHaveValue(/saved-draft/);
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await page.getByRole('button', { name: '打开设置' }).click();
+  await page.getByRole('button', { name: 'Local review', exact: true }).click();
+  await expect(page.getByLabel('Model', { exact: true })).toHaveValue('gemma3:12b');
+  const boot = await page.evaluate(() => window.desktop.bootstrap());
+  expect(boot.ok && boot.value.settings.profiles).toHaveLength(2);
+  expect(boot.ok && boot.value.settings.defaultProfileId).toBe('mock'); expect(errors).toEqual([]);
+  const closed = app.waitForEvent('close'); await app.evaluate(({ app: main }) => main.quit()); await closed;
+});
+
+test('appending a complete sentence and changing appearance retain completed feedback', async () => {
+  await write('Learning takes practice.');
+  await expect(page.getByTestId('feedback-card').first()).toContainText('表达良好');
+  // MutationObserver captures transient repeats that a final-state assertion would miss.
+  await page.evaluate(() => {
+    const observed: string[] = [];
+    (window as unknown as { feedbackStates: string[] }).feedbackStates = observed;
+    new MutationObserver(() => observed.push(document.querySelector('[data-testid="feedback-card"] .card-status')?.textContent ?? '')).observe(document.querySelector('.feedback-card')!, { subtree: true, childList: true, characterData: true });
+  });
+  await page.getByTestId('writing-editor').focus(); await page.keyboard.press('End');
+  await page.keyboard.insertText(' Practice helps us improve.');
+  await expect(page.getByTestId('feedback-card').nth(1)).toContainText('表达良好');
+  await page.getByRole('button', { name: '打开设置' }).click();
+  await page.getByLabel('主题').selectOption('dark');
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await expect(page.getByTestId('feedback-card').first()).toContainText('表达良好');
+  const states = await page.evaluate(() => (window as unknown as { feedbackStates: string[] }).feedbackStates);
+  expect(states.every(s => s === '表达良好')).toBe(true);
+});
+
+test('a failed renderer can save its last snapshot and quit without a menu listener', async () => {
+  const text = 'The latest recovery snapshot.';
+  const result = await page.evaluate(async text => window.desktop.rendererFailed({ id: crypto.randomUUID(), name: '未命名.md', text, mode: 'general', task: '', dirty: true }), text);
+  expect(result.ok).toBe(true);
+  const closed = app.waitForEvent('close'); await app.evaluate(({ app: main }) => main.quit()); await closed;
+  const draft = JSON.parse(await readFile(join(userData, 'draft.json'), 'utf8'));
+  expect(draft.document.text).toBe(text);
+});
+
 test('continuous typing preserves focus and cursor while feedback arrives', async () => {
   await chooseMockBehavior('slow');
   const editor = page.getByTestId('writing-editor');
@@ -220,7 +274,39 @@ test('main process talks to a real HTTP compatible endpoint and falls back from 
     }, address.port);
     expect(result.ok).toBe(true); await page.reload(); await expect(page.getByTestId('writing-editor')).toBeVisible();
     await write('Learning takes practice.'); await expect(page.getByTestId('feedback-card')).toContainText('表达良好');
-    expect(received).toHaveLength(2); expect(received[0]).toHaveProperty('response_format'); expect(received[1]).not.toHaveProperty('response_format');
+    expect(received).toHaveLength(3); expect(received[0]).toHaveProperty('response_format'); expect(received[1]).toHaveProperty('response_format'); expect(received[2]).not.toHaveProperty('response_format');
     const payload = JSON.stringify(received); expect(payload).not.toContain('document_id'); expect(payload).not.toContain(userData);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test('Ollama reviews appear queued until their actual HTTP request starts', async () => {
+  const received: string[] = []; const releases: (() => void)[] = [];
+  const server = createServer((req, res) => {
+    let raw = ''; req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      const body = JSON.parse(raw), input = JSON.parse(body.messages[1].content);
+      received.push(input.original_text);
+      releases.push(() => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ sentence_id: input.sentence_id, original_text: input.original_text, status: 'good', overall_explanation_zh: '表达良好，无需修改。', suggested_revision: null, issues: [], confidence: 0.9 }) } }] })); });
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = (server.address() as { port: number }).port;
+    const saved = await page.evaluate(async port => {
+      const boot = await window.desktop.bootstrap(); if (!boot.ok) throw Error('bootstrap');
+      const p = { ...boot.value.settings.profiles[0], kind: 'ollama' as const, baseUrl: `http://127.0.0.1:${port}/v1`, model: 'test-model' };
+      return window.desktop.saveSettings({ ...boot.value.settings, profiles: [p] }, {});
+    }, port);
+    expect(saved.ok).toBe(true); await page.reload();
+    await write('Learning takes practice. Practice helps us improve.');
+    await expect(page.getByTestId('feedback-card').nth(0)).toContainText('分析中');
+    await expect(page.getByTestId('feedback-card').nth(1)).toContainText('排队中');
+    await expect.poll(() => received.length).toBe(1);
+    releases[0]();
+    await expect(page.getByTestId('feedback-card').nth(0)).toContainText('表达良好');
+    await expect(page.getByTestId('feedback-card').nth(1)).toContainText('分析中');
+    await expect.poll(() => received.length).toBe(2); releases[1]();
+    await expect(page.getByTestId('feedback-card').nth(1)).toContainText('表达良好');
+    expect(received).toEqual(['Learning takes practice.', 'Practice helps us improve.']);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });

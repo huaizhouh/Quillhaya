@@ -31,6 +31,37 @@ describe('non-blocking coordinator', () => {
     t.requests[1].d.resolve({ ok: true, value: good(t.requests[1].r) }); await vi.advanceTimersByTimeAsync(0);
     expect(t.entries[0].result?.original_text).toBe('He goes home.'); t.engine.dispose();
   });
+  it('keeps completed feedback when later sentences are appended or edited', async () => {
+    const t = setup(); t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);
+    t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
+    const firstId = t.entries[0].id;
+    t.engine.update('We learn. Practice helps.', { ...context, revision: 2 }); await vi.advanceTimersByTimeAsync(1500);
+    expect(t.requests.map(({ r }) => r.original_text)).toEqual(['We learn.', 'Practice helps.']);
+    expect(t.entries[0]).toMatchObject({ id: firstId, state: 'done' });
+    t.engine.update('We learn. Practice helps us.', { ...context, revision: 3 }); await vi.advanceTimersByTimeAsync(1500);
+    expect(t.entries[0]).toMatchObject({ id: firstId, state: 'done' });
+    expect(t.api.cancel).not.toHaveBeenCalledWith(t.requests[0].r.request_id); t.engine.dispose();
+  });
+  it('preserves an in-flight earlier review and distinguishes queueing from inference', async () => {
+    const t = setup(); t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);
+    expect(t.entries[0].state).toBe('queued');
+    t.engine.progress({ requestId: t.requests[0].r.request_id, phase: 'running' });
+    expect(t.entries[0].state).toBe('analyzing');
+    t.engine.update('We learn. Practice helps.', { ...context, revision: 2 }); await vi.advanceTimersByTimeAsync(1500);
+    expect(t.api.analyze).toHaveBeenCalledTimes(2); expect(t.api.cancel).not.toHaveBeenCalled();
+    expect(t.entries.map(e => e.state)).toEqual(['analyzing', 'queued']);
+    t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
+    t.engine.progress({ requestId: t.requests[0].r.request_id, phase: 'running' });
+    expect(t.entries[0].state).toBe('done'); t.engine.dispose();
+  });
+  it('rechecks changed preceding context and allows an explicit selected-text review', async () => {
+    const t = setup(); t.engine.update('We learn. Practice helps.', context); await vi.advanceTimersByTimeAsync(220);
+    for (const item of t.requests) item.d.resolve({ ok: true, value: good(item.r) }); await vi.advanceTimersByTimeAsync(0);
+    t.engine.analyze({ from: 0, to: 9 });
+    expect(t.api.analyze).toHaveBeenCalledTimes(3);
+    t.engine.update('We teach. Practice helps.', { ...context, revision: 2 }); await vi.advanceTimersByTimeAsync(220);
+    expect(t.requests.slice(3).map(({ r }) => r.original_text)).toEqual(['We teach.', 'Practice helps.']); t.engine.dispose();
+  });
   it('does not allow a prior document to pollute another document', async () => {
     const t = setup(); t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);
     t.engine.update('We learn.', { ...context, documentId: crypto.randomUUID() });

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeTheme, session, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, session, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
@@ -6,7 +6,7 @@ import { DocumentSchema, ProfileSchema, RequestSchema, SettingsSchema, type Menu
 import { LocalStore } from './storage/store';
 import { Documents } from './storage/documents';
 import { CompatibleProvider, MockProvider, type LLMProvider } from './llm/provider';
-import { RequestQueue } from './llm/queue';
+import { RequestQueue, serialKey } from './llm/queue';
 import { AppError, failure } from './llm/errors';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -16,6 +16,9 @@ if (process.env.TWA_TEST_USER_DATA) app.setPath('userData', process.env.TWA_TEST
 let window: BrowserWindow | null = null;
 let allowClose = false;
 let quitRequested = false;
+let rendererFailed = false;
+let recoveryWrite: Promise<void> = Promise.resolve();
+let recoveryClosePending = false;
 const queue = new RequestQueue();
 let store: LocalStore;
 let documents: Documents;
@@ -44,6 +47,22 @@ function provider(profile: ModelProfile, transientKey?: string): LLMProvider {
   return p;
 }
 function command(value: MenuCommand) { window?.webContents.send('menu:command', value); }
+function requestClose() {
+  if (!rendererFailed) { command('close'); return; }
+  if (recoveryClosePending) return;
+  recoveryClosePending = true;
+  // A failed React tree no longer has its menu listener. Preserve its last snapshot
+  // before exiting, without waiting for that missing renderer acknowledgement.
+  const finish = () => {
+    queue.clear(); allowClose = true;
+    if (quitRequested) app.quit(); else window?.close();
+  };
+  void recoveryWrite.then(finish).catch(async () => {
+    if (!window) return;
+    const reply = await dialog.showMessageBox(window, { type: 'warning', message: '最新草稿未能保存', detail: '请先从恢复页面复制正文。现在退出可能丢失最近的修改。', buttons: ['返回复制正文', '仍然退出'], defaultId: 0, cancelId: 0 });
+    if (reply.response === 1) finish(); else quitRequested = false;
+  }).catch(() => { quitRequested = false; }).finally(() => { recoveryClosePending = false; });
+}
 function createMenu() {
   const template: MenuItemConstructorOptions[] = [
     ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [
@@ -68,25 +87,34 @@ function createMenu() {
 
 function registerIPC() {
   handle('app:bootstrap', async () => {
+    rendererFailed = false;
     const document = await documents.restore();
     return { settings: store.settings, document, restored: document !== null, keyStatus: store.keyStatus(), storageNotice: store.notice };
   });
   handle('settings:save', async data => {
     const { settings, keys } = z.object({ settings: SettingsSchema, keys: z.record(z.string().min(1).max(8000).regex(/^[^\r\n]+$/).nullable()) }).strict().parse(data);
-    await store.saveSettings(settings, keys); providers.clear(); queue.clear();
+    const previous = store.settings.profiles.find(p => p.id === store.settings.defaultProfileId);
+    const current = settings.profiles.find(p => p.id === settings.defaultProfileId)!;
+    const analysisChanged = JSON.stringify(previous) !== JSON.stringify(current) || Object.hasOwn(keys, current.id);
+    await store.saveSettings(settings, keys);
+    if (analysisChanged) { providers.clear(); queue.clear(); }
     nativeTheme.themeSource = settings.theme;
-    return { settings: store.settings, keyStatus: store.keyStatus() };
+    return { settings: store.settings, keyStatus: store.keyStatus(), analysisChanged };
   });
   handle('llm:analyze', data => {
     const request = RequestSchema.parse(data);
     const profile = store.settings.profiles.find(p => p.id === request.profile_id);
     if (!profile) throw new AppError('profile', '模型配置不存在，请重新选择。');
-    return queue.add(request.request_id, signal => provider(profile).analyze(request, signal));
+    window?.webContents.send('llm:progress', { requestId: request.request_id, phase: 'queued' });
+    return queue.add(request.request_id, signal => {
+      window?.webContents.send('llm:progress', { requestId: request.request_id, phase: 'running' });
+      return provider(profile).analyze(request, signal);
+    }, serialKey(profile));
   });
   handle('llm:cancel', data => { queue.cancel(z.string().uuid().parse(data)); });
   handle('llm:test', data => {
     const { profile, key } = z.object({ profile: ProfileSchema, key: z.string().max(8000).regex(/^[^\r\n]*$/).optional() }).strict().parse(data);
-    return queue.add(crypto.randomUUID(), signal => provider(profile, key || undefined).testConnection(signal));
+    return queue.add(crypto.randomUUID(), signal => provider(profile, key || undefined).testConnection(signal), serialKey(profile));
   });
   handle('document:draft', data => documents.draft(DocumentSchema.parse(data)));
   handle('document:open', () => documents.open());
@@ -101,11 +129,19 @@ function registerIPC() {
     if (quitRequested) app.quit(); else window?.close();
   });
   handle('app:cancel-close', () => { quitRequested = false; });
+  handle('app:renderer-failed', data => {
+    const snapshot = DocumentSchema.optional().parse(data);
+    rendererFailed = true; queue.clear();
+    recoveryWrite = snapshot ? documents.draft(snapshot) : Promise.resolve();
+    return recoveryWrite;
+  });
   handle('clipboard:copy', async data => { await clipboard.writeText(z.string().max(50_000).parse(data)); });
 }
 
 async function createWindow() {
   allowClose = false;
+  rendererFailed = false;
+  recoveryWrite = Promise.resolve();
   window = new BrowserWindow({ width: 1380, height: 910, minWidth: 940, minHeight: 650, show: false,
     title: 'TOEFL Writing Assistant', titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 22, y: 23 },
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d2423' : '#f7f8f5',
@@ -114,7 +150,8 @@ async function createWindow() {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.on('will-attach-webview', event => event.preventDefault());
-  window.on('close', event => { if (!allowClose) { event.preventDefault(); command('close'); } });
+  window.webContents.on('render-process-gone', () => { rendererFailed = true; queue.clear(); });
+  window.on('close', event => { if (!allowClose) { event.preventDefault(); requestClose(); } });
   window.on('closed', () => { window = null; queue.clear(); providers.clear(); });
   window.once('ready-to-show', () => window?.show());
   await window.loadURL(trustedUrl);
@@ -131,5 +168,5 @@ app.whenReady().then(async () => {
 }).catch(() => { process.stderr.write('应用启动失败，请检查数据目录权限或重新安装依赖。\n'); app.exit(1); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', event => {
-  if (!allowClose && window) { event.preventDefault(); quitRequested = true; command('close'); }
+  if (!allowClose && window) { event.preventDefault(); quitRequested = true; requestClose(); }
 });

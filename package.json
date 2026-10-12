@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test",
     "test:dev": "node scripts/dev-smoke.mjs",
+    "test:ollama": "node scripts/ollama-smoke.mjs",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

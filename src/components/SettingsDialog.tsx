@@ -2,11 +2,12 @@ import { Check, CheckCircle2, Plus, SlidersHorizontal, Trash2, X } from 'lucide-
 import { useEffect, useRef, useState } from 'react';
 import { makeProfile, presetInfo, SettingsSchema, type ModelProfile, type Settings } from '../models/schema';
 
-export function SettingsDialog({ settings, keyStatus, onClose, onSaved }: { settings: Settings; keyStatus: Record<string, boolean>; onClose: () => void; onSaved: (settings: Settings, keyStatus: Record<string, boolean>) => void }) {
+export function SettingsDialog({ settings, keyStatus, onClose, onSaved }: { settings: Settings; keyStatus: Record<string, boolean>; onClose: () => void; onSaved: (settings: Settings, keyStatus: Record<string, boolean>, analysisChanged: boolean) => void }) {
   const [draft, setDraft] = useState<Settings>(() => structuredClone(settings));
   const [selected, setSelected] = useState(settings.defaultProfileId);
   const [keys, setKeys] = useState<Record<string, string | null>>({});
-  const [headerText, setHeaderText] = useState(JSON.stringify(settings.profiles.find(p => p.id === selected)!.headers, null, 2));
+  // Read saved settings only on mount. New, unsaved profile IDs exist in draft alone.
+  const [headerText, setHeaderText] = useState(() => JSON.stringify(settings.profiles.find(p => p.id === settings.defaultProfileId)!.headers, null, 2));
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -25,7 +26,7 @@ export function SettingsDialog({ settings, keyStatus, onClose, onSaved }: { sett
   const save = async () => {
     const next = withHeaders(); if (!next) return;
     setBusy(true);
-    try { const reply = await window.desktop.saveSettings(next, keys); if (reply.ok) { setKeys({}); onSaved(reply.value.settings, reply.value.keyStatus); onClose(); } else setMessage(reply.error.message); }
+    try { const reply = await window.desktop.saveSettings(next, keys); if (reply.ok) { setKeys({}); onSaved(reply.value.settings, reply.value.keyStatus, reply.value.analysisChanged); onClose(); } else setMessage(reply.error.message); }
     catch { setMessage('设置保存失败，请重试。'); } finally { setBusy(false); }
   };
   const test = async () => {
@@ -38,7 +39,7 @@ export function SettingsDialog({ settings, keyStatus, onClose, onSaved }: { sett
     <div className="settings-heading"><div><span className="eyebrow">MAKE IT YOURS</span><h2 id="settings-title"><SlidersHorizontal size={21} />写作设置</h2></div><button className="icon-button" aria-label="关闭设置" onClick={onClose}><X size={20} /></button></div>
     <div className="settings-content">
       <aside className="profile-list"><span className="eyebrow">模型配置</span>{draft.profiles.map(p => <button className={p.id === selected ? 'selected' : ''} key={p.id} onClick={() => { const next = withHeaders(); if (next) { setDraft(next); select(next.profiles.find(n => n.id === p.id)!); } }}><span>{p.name}</span>{p.id === draft.defaultProfileId && <Check size={13} />}</button>)}
-        <button className="add-profile" onClick={() => { const next = withHeaders(); if (!next) return; const p = makeProfile('custom', crypto.randomUUID()); setDraft({ ...next, profiles: [...next.profiles, p] }); select(p); }}><Plus size={15} />添加模型</button>
+        <button className="add-profile" disabled={busy || draft.profiles.length >= 25} onClick={() => { const next = withHeaders(); if (!next) return; const p = makeProfile('custom', crypto.randomUUID()); setDraft({ ...next, profiles: [...next.profiles, p] }); select(p); }}><Plus size={15} />添加模型</button>
         <div className="local-note"><span className="small-leaf">⌘</span><p>你的写作空间，<br />由你选择模型。</p></div>
       </aside>
       <div className="settings-fields">
@@ -58,6 +59,7 @@ export function SettingsDialog({ settings, keyStatus, onClose, onSaved }: { sett
           <details className="advanced"><summary>附加 Headers（非密钥）</summary><label>JSON 对象<textarea value={headerText} onChange={e => { setHeaderText(e.target.value); try { patch({ headers: JSON.parse(e.target.value) }); } catch { /* validated on save */ } }} spellCheck={false} rows={3} placeholder={'{"HTTP-Referer":"https://example.com"}'} /></label></details>
         </> : <div className="mock-settings"><strong>这是演示模式，不是真实 AI 评估</strong><p>仅用固定规则演示语法建议、良好表达和异步状态，不发送网络请求。</p><label>模拟响应<select aria-label="模拟响应" value={profile.mockBehavior} onChange={e => patch({ mockBehavior: e.target.value as ModelProfile['mockBehavior'] })}><option value="normal">正常响应</option><option value="slow">慢速响应（4 秒）</option><option value="error">模拟连接失败</option></select></label></div>}
         <div className="field-grid"><label>请求超时（秒）<input type="number" min="1" max="120" value={profile.timeoutMs / 1000} onChange={e => patch({ timeoutMs: Number(e.target.value) * 1000 })} /></label><label className="checkbox-field"><input type="checkbox" checked={draft.defaultProfileId === selected} onChange={() => setDraft({ ...draft, defaultProfileId: selected })} />设为当前及默认模型</label></div>
+        <p className="field-hint">每次 HTTP 请求发出后开始计时，应用内排队不计入超时。{profile.kind === 'ollama' && '同一 Ollama 服务逐条分析；模型加载和生成时间计入请求超时。'}</p>
         <div className="section-label">编辑与外观</div>
         <div className="field-grid"><label>主题<select value={draft.theme} onChange={e => setDraft({ ...draft, theme: e.target.value as Settings['theme'] })}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label><label>正文字号<input type="number" min="14" max="26" value={draft.fontSize} onChange={e => setDraft({ ...draft, fontSize: Number(e.target.value) })} /></label><label>停顿延迟（毫秒）<input aria-label="停顿延迟" type="number" min="300" max="10000" step="100" value={draft.debounceMs} onChange={e => setDraft({ ...draft, debounceMs: Number(e.target.value) })} /></label><label className="checkbox-field"><input type="checkbox" checked={draft.autoAnalyze} onChange={e => setDraft({ ...draft, autoAnalyze: e.target.checked })} />自动分析</label></div>
         <p className="privacy-note"><CheckCircle2 size={15} />文本只发送到你选定的服务。云端服务接收待分析句子和必要上下文；本地端点的数据处理由本地服务决定。“分析全文”会主动发送全文。密钥仅作为该端点的认证凭据使用，通过系统安全存储加密保存，不写入日志。</p>

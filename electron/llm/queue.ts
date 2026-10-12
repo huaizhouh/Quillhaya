@@ -1,5 +1,15 @@
 import { abortError, AppError } from './errors';
-type Job = { id: string; controller: AbortController; run: (signal: AbortSignal) => Promise<unknown>; resolve: (value: unknown) => void; reject: (reason: unknown) => void };
+import type { ModelProfile } from '../../src/models/schema';
+type Job = { id: string; serialKey?: string; controller: AbortController; run: (signal: AbortSignal) => Promise<unknown>; resolve: (value: unknown) => void; reject: (reason: unknown) => void };
+
+/** Ollama may queue inference internally. Keep that wait in our cancellable queue instead. */
+export function serialKey(profile: ModelProfile): string | undefined {
+  if (profile.kind !== 'ollama') return undefined;
+  const url = new URL(profile.baseUrl);
+  // localhost and loopback IPs refer to the same local server.
+  const host = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ? 'loopback' : url.hostname;
+  return `${url.protocol}//${host}:${url.port}`;
+}
 
 /** Main-process global limit, shared by analysis and connection tests. */
 export class RequestQueue {
@@ -8,11 +18,11 @@ export class RequestQueue {
   private nextStart = 0;
   private timer?: ReturnType<typeof setTimeout>;
   constructor(private concurrency = 2, private intervalMs = 300) {}
-  add<T>(id: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  add<T>(id: string, run: (signal: AbortSignal) => Promise<T>, serialKey?: string): Promise<T> {
     if (this.pending.length >= 200) return Promise.reject(new AppError('queue_full', '待分析内容较多，请稍后重试。', true));
     if (this.active.has(id) || this.pending.some(j => j.id === id)) return Promise.reject(new AppError('duplicate', '请求已在处理中。'));
     return new Promise<T>((resolve, reject) => {
-      this.pending.push({ id, run, resolve: resolve as (v: unknown) => void, reject, controller: new AbortController() }); this.pump();
+      this.pending.push({ id, serialKey, run, resolve: resolve as (v: unknown) => void, reject, controller: new AbortController() }); this.pump();
     });
   }
   cancel(id: string) {
@@ -27,14 +37,19 @@ export class RequestQueue {
   }
   private pump() {
     if (!this.pending.length || this.active.size >= this.concurrency) return;
+    const index = this.pending.findIndex(job => !job.serialKey || ![...this.active.values()].some(active => active.serialKey === job.serialKey));
+    if (index < 0) return;
     const wait = this.nextStart - Date.now();
     if (wait > 0) {
       if (this.timer) clearTimeout(this.timer);
       this.timer = setTimeout(() => this.pump(), wait); return;
     }
-    const job = this.pending.shift()!;
+    const [job] = this.pending.splice(index, 1);
     this.active.set(job.id, job); this.nextStart = Date.now() + this.intervalMs;
-    Promise.resolve().then(() => job.run(job.controller.signal)).then(job.resolve, job.reject).finally(() => { this.active.delete(job.id); this.pump(); });
+    Promise.resolve().then(() => {
+      if (job.controller.signal.aborted) throw abortError();
+      return job.run(job.controller.signal);
+    }).then(job.resolve, job.reject).finally(() => { this.active.delete(job.id); this.pump(); });
     this.pump();
   }
 }

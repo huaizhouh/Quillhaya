@@ -72,6 +72,7 @@ export const DocumentSchema = z.object({
 }).strict();
 export type WritingDocument = z.infer<typeof DocumentSchema>;
 export type MenuCommand = 'new' | 'open' | 'save' | 'saveAs' | 'settings' | 'close';
+export type AnalysisProgress = { requestId: string; phase: 'queued' | 'running' };
 export type Bootstrap = { settings: Settings; document: WritingDocument | null; restored: boolean; keyStatus: Record<string, boolean>; storageNotice?: string };
 
 export const presetInfo: Record<ModelProfile['kind'], { name: string; url: string; model: string; auth: ModelProfile['auth']; envKey: string }> = {
@@ -92,7 +93,7 @@ export const defaultSettings: Settings = { theme: 'system', fontSize: 18, deboun
 
 export interface DesktopAPI {
   bootstrap(): Promise<Reply<Bootstrap>>;
-  saveSettings(settings: Settings, keys: Record<string, string | null>): Promise<Reply<{ settings: Settings; keyStatus: Record<string, boolean> }>>;
+  saveSettings(settings: Settings, keys: Record<string, string | null>): Promise<Reply<{ settings: Settings; keyStatus: Record<string, boolean>; analysisChanged: boolean }>>;
   testConnection(profile: ModelProfile, key?: string): Promise<Reply<string>>;
   analyze(request: AnalysisRequest): Promise<Reply<AnalysisResult>>;
   cancel(requestId: string): Promise<void>;
@@ -102,7 +103,9 @@ export interface DesktopAPI {
   confirmDiscard(): Promise<Reply<'save' | 'discard' | 'cancel'>>;
   close(document: WritingDocument): Promise<Reply<void>>;
   cancelClose(): Promise<Reply<void>>;
+  rendererFailed(document?: WritingDocument): Promise<Reply<void>>;
   copy(text: string): Promise<Reply<void>>;
   onMenu(callback: (command: MenuCommand) => void): () => void;
+  onAnalysisProgress(callback: (progress: AnalysisProgress) => void): () => void;
 }
 declare global { interface Window { desktop: DesktopAPI } }

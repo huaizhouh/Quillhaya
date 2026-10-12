@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { DesktopAPI, MenuCommand } from '../src/models/schema';
+import type { AnalysisProgress, DesktopAPI, MenuCommand } from '../src/models/schema';
 
 const api: DesktopAPI = {
   bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
@@ -13,7 +13,13 @@ const api: DesktopAPI = {
   confirmDiscard: () => ipcRenderer.invoke('document:confirm'),
   close: document => ipcRenderer.invoke('app:close', document),
   cancelClose: () => ipcRenderer.invoke('app:cancel-close'),
+  rendererFailed: document => ipcRenderer.invoke('app:renderer-failed', document),
   copy: text => ipcRenderer.invoke('clipboard:copy', text),
+  onAnalysisProgress: callback => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: AnalysisProgress) => callback(progress);
+    ipcRenderer.on('llm:progress', handler);
+    return () => ipcRenderer.removeListener('llm:progress', handler);
+  },
   onMenu: callback => {
     const handler = (_event: Electron.IpcRendererEvent, command: MenuCommand) => callback(command);
     ipcRenderer.on('menu:command', handler);

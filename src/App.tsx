@@ -11,7 +11,7 @@ const example = 'I think online courses are quite efficiency and convenience.\n\
 const exampleTask = 'Some students prefer taking online courses, while others prefer studying in a traditional classroom. Which approach do you think is more effective, and why?';
 const freshDocument = (): WritingDocument => ({ id: crypto.randomUUID(), name: '未命名.md', text: '', task: '', mode: 'discussion', dirty: false });
 
-export default function App() {
+export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocument) => void }) {
   const [doc, setDoc] = useState<WritingDocument>(freshDocument);
   const docRef = useRef(doc); docRef.current = doc;
   const [settings, setSettings] = useState<Settings>(defaultSettings);
@@ -44,6 +44,7 @@ export default function App() {
   const goodCount = visible.filter(e => e.result?.status === 'good').length;
   const revisionCount = visible.filter(e => e.result?.status === 'needs_revision').length;
   const activeCount = visible.filter(e => e.state === 'analyzing').length;
+  const queuedCount = visible.filter(e => e.state === 'queued').length;
   const marks = useMemo(() => entries.filter(e => !e.ignored && e.result?.status === 'needs_revision').map(({ from, to }) => ({ from, to })), [entries]);
 
   useEffect(() => {
@@ -56,8 +57,13 @@ export default function App() {
       if (reply.value.storageNotice) notify(reply.value.storageNotice);
       setReady(true);
     }).catch(() => setBootError('无法连接桌面服务，请重新启动应用。'));
-    return () => { engine.dispose(); };
+    const unsubscribe = window.desktop.onAnalysisProgress(progress => {
+      engine.progress(progress);
+      setFull(entry => entry?.requestId === progress.requestId ? { ...entry, state: progress.phase === 'running' ? 'analyzing' : 'queued' } : entry);
+    });
+    return () => { unsubscribe(); engine.dispose(); };
   }, [notify]);
+  useEffect(() => { if (ready) onSnapshot(doc); }, [ready, doc, onSnapshot]);
   useEffect(() => { document.documentElement.dataset.theme = settings.theme; }, [settings.theme]);
   useEffect(() => {
     if (!ready) return;
@@ -135,7 +141,7 @@ export default function App() {
     }
     notify('已接受修改 · 可使用 ⌘Z 撤销');
   };
-  const saveSettings = (next: Settings, status = keyStatus) => { setSettings(next); setKeyStatus(status); setConfigVersion(v => v + 1); };
+  const saveSettings = (next: Settings, status = keyStatus, analysisChanged = true) => { setSettings(next); setKeyStatus(status); if (analysisChanged) setConfigVersion(v => v + 1); };
   const toggleAuto = async () => {
     const next = { ...settings, autoAnalyze: !settings.autoAnalyze };
     const reply = await window.desktop.saveSettings(next, {});
@@ -158,13 +164,13 @@ export default function App() {
     if (fullRequest.current) void window.desktop.cancel(fullRequest.current);
     const id = crypto.randomUUID(); fullRequest.current = id;
     const request: AnalysisRequest = { request_id: id, document_id: snapshot.id, revision_id: revision.current, sentence_id: 'document-review', original_text: snapshot.text, from: 0, to: snapshot.text.length, scope: 'document', mode: snapshot.mode, context: { before: [], after: [], task: snapshot.task }, profile_id: profile.id };
-    const entry: FeedbackEntry = { id: 'document-review', text: '全文 · 结构、连贯性与任务回应', from: 0, to: snapshot.text.length, complete: true, signature: id, state: 'analyzing' };
+    const entry: FeedbackEntry = { id: 'document-review', text: '全文 · 结构、连贯性与任务回应', from: 0, to: snapshot.text.length, complete: true, signature: id, requestId: id, state: 'queued' };
     setFull(entry); setCollapsed(false);
     try {
       const reply = await window.desktop.analyze(request);
       if (fullRequest.current !== id || docRef.current.id !== snapshot.id || docRef.current.text !== snapshot.text) return;
-      setFull(reply.ok ? { ...entry, state: 'done', result: reply.value } : { ...entry, state: 'error', error: reply.error });
-    } catch { if (fullRequest.current === id) setFull({ ...entry, state: 'error', error: { code: 'ipc', message: '全文分析失败，请重试。', retryable: true } }); }
+      setFull(reply.ok ? { ...entry, requestId: undefined, state: 'done', result: reply.value } : { ...entry, requestId: undefined, state: 'error', error: reply.error });
+    } catch { if (fullRequest.current === id) setFull({ ...entry, requestId: undefined, state: 'error', error: { code: 'ipc', message: '全文分析失败，请重试。', retryable: true } }); }
     finally { if (fullRequest.current === id) fullRequest.current = null; }
   };
 
@@ -186,7 +192,7 @@ export default function App() {
       {!collapsed && <>
         <div className="splitter" role="separator" aria-label="调整反馈栏宽度" aria-orientation="vertical" aria-valuenow={sidebarWidth} aria-valuemin={27} aria-valuemax={48} tabIndex={0} onKeyDown={e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setSidebarWidth(v => Math.min(48, Math.max(27, v + (e.key === 'ArrowLeft' ? 2 : -2)))); } }} onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); }} onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) setSidebarWidth(Math.min(48, Math.max(27, (1 - e.clientX / window.innerWidth) * 100))); }} onPointerUp={e => e.currentTarget.releasePointerCapture(e.pointerId)} />
         <aside className="feedback-pane" aria-label="AI Writing Feedback">
-          <div className="feedback-header"><span className="eyebrow">A SECOND PAIR OF EYES</span><div><h2><Sparkles size={20} />写作反馈</h2><button className="icon-button" aria-label={settings.autoAnalyze ? '暂停自动分析' : '恢复自动分析'} title={settings.autoAnalyze ? '暂停自动分析' : '恢复自动分析'} onClick={() => void toggleAuto()}>{settings.autoAnalyze ? <Pause size={16} /> : <Play size={16} />}</button></div><p>只在有必要时，给你一点建议。</p><div className="model-status"><span className={settings.autoAnalyze ? 'live-dot' : 'paused-dot'} /><select aria-label="当前模型" value={settings.defaultProfileId} onChange={e => void switchModel(e.target.value)}>{settings.profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>{profile.kind === 'mock' && <span className="demo-badge">演示</span>}<span className="analysis-state">{!settings.autoAnalyze ? '已暂停' : activeCount ? `${activeCount} 句分析中` : '自动分析已开启'}</span></div></div>
+          <div className="feedback-header"><span className="eyebrow">A SECOND PAIR OF EYES</span><div><h2><Sparkles size={20} />写作反馈</h2><button className="icon-button" aria-label={settings.autoAnalyze ? '暂停自动分析' : '恢复自动分析'} title={settings.autoAnalyze ? '暂停自动分析' : '恢复自动分析'} onClick={() => void toggleAuto()}>{settings.autoAnalyze ? <Pause size={16} /> : <Play size={16} />}</button></div><p>只在有必要时，给你一点建议。</p><div className="model-status"><span className={settings.autoAnalyze ? 'live-dot' : 'paused-dot'} /><select aria-label="当前模型" value={settings.defaultProfileId} onChange={e => void switchModel(e.target.value)}>{settings.profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>{profile.kind === 'mock' && <span className="demo-badge">演示</span>}<span className="analysis-state">{!settings.autoAnalyze ? '已暂停' : activeCount || queuedCount ? [activeCount ? `${activeCount} 句分析中` : '', queuedCount ? `${queuedCount} 句排队中` : ''].filter(Boolean).join(' · ') : '自动分析已开启'}</span></div></div>
           <div className="feedback-summary"><span><i className="summary-dot amber" />{revisionCount} 条建议</span><span><i className="summary-dot green" />{goodCount} 句表达良好</span><button className="text-button" title="只发送选中内容所在的句子与必要上下文" onClick={analyzeSelection}>分析选中内容</button></div>
           <div className="feedback-scroll">
             {full && <FeedbackCard entry={full} index={0} onIgnore={() => setFull(null)} onRetry={() => void analyzeFull()} onLocate={() => editor.current?.locate(0, 0)} notify={notify} />}
