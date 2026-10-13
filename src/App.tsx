@@ -11,7 +11,7 @@ import { defaultSettings, modeLabels, type AnalysisRequest, type MenuCommand, ty
 
 const example = 'I think online courses are quite efficiency and convenience.\n\nStudents can study at their own pace and review difficult material whenever they need to. This flexibility is especially valuable for people who balance education with a full-time job.\n\nHowever, learning online also requires self-discipline. I believe a combination of online resources and classroom discussions offers the best of both worlds.';
 const exampleTask = 'Some students prefer taking online courses, while others prefer studying in a traditional classroom. Which approach do you think is more effective, and why?';
-const freshDocument = (): WritingDocument => ({ id: crypto.randomUUID(), name: '未命名.md', text: '', task: '', mode: 'discussion', dirty: false });
+const freshDocument = (): WritingDocument => ({ id: crypto.randomUUID(), name: '未命名.md', text: '', task: '', mode: 'discussion', dirty: false, hasFile: false });
 
 export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocument) => void }) {
   const [doc, setDoc] = useState<WritingDocument>(freshDocument);
@@ -37,6 +37,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   const editor = useRef<EditorHandle>(null);
   const coordinator = useRef<AnalysisCoordinator | null>(null);
   const fullRequest = useRef<string | null>(null);
+  const fullSnapshot = useRef<{ documentId: string; text: string; task: string; mode: WritingMode; profileId: string; configVersion: number } | null>(null);
   const timer = useWritingTimer();
   const [modelsStopped, setModelsStopped] = useState(false);
   const [modelStopping, setModelStopping] = useState(false);
@@ -51,7 +52,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   const revisionCount = visible.filter(e => e.result?.status === 'needs_revision').length;
   const activeCount = visible.filter(e => e.state === 'analyzing').length;
   const queuedCount = visible.filter(e => e.state === 'queued').length;
-  const marks = useMemo<ProblemMark[]>(() => entries.filter(e => !e.ignored && e.result?.status === 'needs_revision').map(({ from, to, result }) => ({ from, to, severity: result!.issues.some(issue => issue.severity === 'error') ? 'error' : 'improvement' })), [entries]);
+  const marks = useMemo<ProblemMark[]>(() => entries.filter(e => !e.ignored && !e.textChanged && e.result?.status === 'needs_revision').map(({ from, to, result }) => ({ from, to, severity: result!.issues.some(issue => issue.severity === 'error') ? 'error' : 'improvement' })), [entries]);
 
   useEffect(() => {
     if (!window.desktop) { setBootError('请使用 npm run dev 启动 Electron 桌面应用。'); return; }
@@ -74,9 +75,9 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   useEffect(() => { if (closing) closingDialog.current?.showModal(); }, [closing]);
   useEffect(() => {
     if (!ready) return;
-    coordinator.current?.configure(automatic && !settingsOpen, settings.debounceMs);
+    coordinator.current?.configure(automatic && !settingsOpen, settings.debounceMs, settings.revisionDebounceMs);
     coordinator.current?.update(doc.text, { documentId: doc.id, revision: revision.current, mode: doc.mode, task: doc.task, profileId: settings.defaultProfileId, configVersion }, composing);
-  }, [ready, doc.id, doc.text, doc.mode, doc.task, automatic, settingsOpen, settings.debounceMs, settings.defaultProfileId, configVersion, composing]);
+  }, [ready, doc.id, doc.text, doc.mode, doc.task, automatic, settingsOpen, settings.debounceMs, settings.revisionDebounceMs, settings.defaultProfileId, configVersion, composing]);
   useEffect(() => {
     if (settingsOpen && fullRequest.current) {
       void window.desktop.cancel(fullRequest.current); fullRequest.current = null;
@@ -84,8 +85,15 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
     }
   }, [settingsOpen]);
   useEffect(() => {
+    const snapshot = fullSnapshot.current;
+    if (!snapshot) return;
+    if (snapshot.documentId !== doc.id) {
+      if (fullRequest.current) { void window.desktop.cancel(fullRequest.current); fullRequest.current = null; }
+      fullSnapshot.current = null; setFull(null); return;
+    }
+    const changed = snapshot.text !== doc.text || snapshot.task !== doc.task || snapshot.mode !== doc.mode || snapshot.profileId !== settings.defaultProfileId || snapshot.configVersion !== configVersion;
     if (fullRequest.current) { void window.desktop.cancel(fullRequest.current); fullRequest.current = null; }
-    setFull(null);
+    setFull(entry => entry ? { ...entry, contextChanged: changed, requestId: undefined, state: entry.result ? 'done' : 'pending' } : null);
   }, [doc.id, doc.text, doc.task, doc.mode, configVersion, settings.defaultProfileId]);
   useEffect(() => {
     if (!ready) return;
@@ -109,7 +117,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
     if (!reply.ok) { notify(reply.error.message); return false; }
     if (!reply.value) return false;
     const name = reply.value.name;
-    setDoc(current => current.id === snapshot.id ? { ...current, name, dirty: current.text !== snapshot.text } : current);
+    setDoc(current => current.id === snapshot.id ? { ...current, name, dirty: current.text !== snapshot.text, hasFile: true } : current);
     if (docRef.current.id === snapshot.id && docRef.current.text !== snapshot.text) {
       notify('已保存先前版本；保存期间的新输入仍在编辑器中，请再次保存。'); return false;
     }
@@ -199,12 +207,15 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
     if (fullRequest.current) void window.desktop.cancel(fullRequest.current);
     const id = crypto.randomUUID(); fullRequest.current = id;
     const request: AnalysisRequest = { request_id: id, document_id: snapshot.id, revision_id: revision.current, sentence_id: 'document-review', original_text: snapshot.text, from: 0, to: snapshot.text.length, scope: 'document', mode: snapshot.mode, context: { before: [], after: [], task: snapshot.task }, profile_id: profile.id };
-    const entry: FeedbackEntry = { id: 'document-review', text: '全文 · 结构、连贯性与任务回应', from: 0, to: snapshot.text.length, complete: true, signature: id, requestId: id, state: 'queued' };
+    const reviewedSnapshot = { documentId: snapshot.id, text: snapshot.text, task: snapshot.task, mode: snapshot.mode, profileId: profile.id, configVersion };
+    if (!full?.result) fullSnapshot.current = reviewedSnapshot;
+    const entry: FeedbackEntry = { ...full, id: 'document-review', text: '全文 · 结构、连贯性与任务回应', from: 0, to: snapshot.text.length, complete: true, signature: id, requestId: id, state: 'queued', error: undefined };
     setFull(entry); setCollapsed(false);
     try {
       const reply = await window.desktop.analyze(request);
       if (fullRequest.current !== id || docRef.current.id !== snapshot.id || docRef.current.text !== snapshot.text) return;
-      setFull(reply.ok ? { ...entry, requestId: undefined, state: 'done', result: reply.value } : { ...entry, requestId: undefined, state: 'error', error: reply.error });
+      if (reply.ok) fullSnapshot.current = reviewedSnapshot;
+      setFull(reply.ok ? { ...entry, requestId: undefined, state: 'done', result: reply.value, contextChanged: false } : { ...entry, requestId: undefined, state: 'error', error: reply.error });
     } catch { if (fullRequest.current === id) setFull({ ...entry, requestId: undefined, state: 'error', error: { code: 'ipc', message: '全文分析失败，请重试。', retryable: true } }); }
     finally { if (fullRequest.current === id) fullRequest.current = null; }
   };
@@ -213,7 +224,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   if (!ready) return <div className="boot-screen"><Leaf size={34} /><p>正在打开你的写作空间…</p></div>;
   return <div className="app-shell" style={{ '--editor-font-size': `${settings.fontSize}px`, '--sidebar-width': `${sidebarWidth}%` } as CSSProperties}>
     <header className="titlebar"><div className="app-brand"><span className="brand-mark"><Leaf size={16} /></span><span>TOEFL <b>Writing Assistant</b></span></div><div className="titlebar-actions"><span className="local-indicator"><span />本地写作空间</span><button className="icon-button" aria-label="打开设置" title="设置 ⌘," onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></div></header>
-    <div className="workspace-toolbar"><div className="document-info"><FileText size={18} /><span className="document-name">{doc.name}</span><span className={`save-pill ${doc.dirty ? 'unsaved' : ''}`}>{doc.dirty ? '未保存至文件' : '已保存'}</span></div><div className="file-actions"><button className="icon-button" aria-label="新建文档" title="新建 ⌘N" disabled={fileBusy} onClick={() => void action('new')}><FilePlus2 size={17} /></button><button className="icon-button" aria-label="打开文档" title="打开 ⌘O" disabled={fileBusy} onClick={() => void action('open')}><FolderOpen size={18} /></button><button className="secondary-button compact" disabled={fileBusy} onClick={() => void action('save')}><ArrowDownToLine size={15} />保存<span className="shortcut">⌘S</span></button><span className="toolbar-divider" /><button className="icon-button" aria-label={collapsed ? '展开反馈' : '折叠反馈'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <PanelRightOpen size={19} /> : <PanelRightClose size={19} />}</button></div></div>
+    <div className="workspace-toolbar"><div className="document-info"><FileText size={18} /><span className="document-name">{doc.name}</span><span className={`save-pill ${!doc.hasFile || doc.dirty ? 'unsaved' : ''}`}>{!doc.hasFile || doc.dirty ? '未保存至文件' : '已保存'}</span></div><div className="file-actions"><button className="icon-button" aria-label="新建文档" title="新建 ⌘N" disabled={fileBusy} onClick={() => void action('new')}><FilePlus2 size={17} /></button><button className="icon-button" aria-label="打开文档" title="打开 ⌘O" disabled={fileBusy} onClick={() => void action('open')}><FolderOpen size={18} /></button><button className="secondary-button compact" disabled={fileBusy} onClick={() => void action('save')}><ArrowDownToLine size={15} />保存<span className="shortcut">⌘S</span></button><span className="toolbar-divider" /><button className="icon-button" aria-label={collapsed ? '展开反馈' : '折叠反馈'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <PanelRightOpen size={19} /> : <PanelRightClose size={19} />}</button></div></div>
     {restored && <div className="restore-banner"><Check size={14} />已恢复上次会话。自动草稿不会覆盖原始 Markdown 文件。<button aria-label="关闭恢复提示" className="icon-button" onClick={() => setRestored(false)}><X size={14} /></button></div>}
     <main className={`workspace ${collapsed ? 'feedback-collapsed' : ''}`}>
       <section className="writing-pane" aria-label="写作区">
@@ -230,7 +241,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
           <div className="feedback-header"><span className="eyebrow">A SECOND PAIR OF EYES</span><div><h2><Sparkles size={20} />写作反馈</h2><div className="model-actions"><button className="icon-button" disabled={modelStopping} aria-label={automatic ? '暂停自动分析' : '恢复自动分析'} title={automatic ? '暂停自动分析' : '恢复自动分析'} onClick={() => void toggleAuto()}>{automatic ? <Pause size={16} /> : <Play size={16} />}</button><button className="icon-button" disabled={modelStopping} aria-label="停止并释放模型" title="停止所有请求并释放本应用使用的 Ollama 模型" onClick={() => void stopModels()}>{modelStopping ? <span className="spinner" /> : <Power size={16} />}</button></div></div><p>只在有必要时，给你一点建议。</p><div className="model-status"><span className={automatic ? 'live-dot' : 'paused-dot'} /><select aria-label="当前模型" value={settings.defaultProfileId} onChange={e => void switchModel(e.target.value)}>{settings.profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>{profile.kind === 'mock' && <span className="demo-badge">演示</span>}<span className="analysis-state">{!automatic ? '已暂停' : activeCount || queuedCount ? [activeCount ? `${activeCount} 句分析中` : '', queuedCount ? `${queuedCount} 句排队中` : ''].filter(Boolean).join(' · ') : '自动分析已开启'}</span></div></div>
           <div className="feedback-summary"><span><i className="summary-dot amber" />{revisionCount} 条建议</span><span><i className="summary-dot green" />{goodCount} 句表达良好</span><button className="text-button" title="只发送选中内容所在的句子与必要上下文" onClick={analyzeSelection}>分析选中内容</button></div>
           <div className="feedback-scroll">
-            {full && <FeedbackCard entry={full} index={0} onIgnore={() => setFull(null)} onRetry={() => void analyzeFull()} onLocate={() => editor.current?.locate(0, 0)} notify={notify} />}
+            {full && <FeedbackCard scope="document" entry={full} index={0} onIgnore={() => setFull(null)} onRetry={() => void analyzeFull()} onLocate={() => editor.current?.locate(0, 0)} notify={notify} />}
             {visible.length ? visible.map((entry, index) => <FeedbackCard key={entry.id} entry={entry} index={index} onAccept={() => accept(entry.id)} onIgnore={() => coordinator.current?.ignore(entry.id)} onRetry={() => { if (!modelStopping) coordinator.current?.analyze(undefined, entry.id); }} onLocate={() => editor.current?.locate(entry.from, entry.to)} notify={notify} />) : <div className="feedback-empty"><div className="empty-illustration"><div className="mini-page"><span /><span /><span /><div><Check size={15} /></div></div><span className="mini-spark">✧</span></div><h3>给思考留出空间。</h3><p>写下第一句英语，<br />中文反馈就会在这里等你。</p><div className="empty-principles"><span><Check size={14} />保留你的原意与语气</span><span><Check size={14} />自然的表达，无需修改</span><span><Check size={14} />是否接受，由你决定</span></div>{profile.kind === 'mock' && <button className="secondary-button" onClick={() => void action('example')}><Plus size={14} />体验示例反馈</button>}</div>}
             {profile.kind === 'mock' && visible.length > 0 && <p className="demo-footnote">MOCK 演示 · 固定规则，仅展示交互。<br />在设置中连接真实模型，获取实际写作反馈。</p>}
           </div>

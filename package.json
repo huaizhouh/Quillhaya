@@ -21,6 +21,7 @@
     "test:ollama": "node scripts/ollama-smoke.mjs",
     "test:ollama:lifecycle": "node scripts/ollama-lifecycle-smoke.mjs",
     "test:ollama:close": "npm run build && node scripts/ollama-close-smoke.mjs",
+    "test:ollama:review": "node scripts/ollama-review-smoke.mjs",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

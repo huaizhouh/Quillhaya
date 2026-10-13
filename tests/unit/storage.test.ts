@@ -65,4 +65,19 @@ describe('document and settings persistence', () => {
     const recovery = (await readdir(directory)).find(name => name.startsWith('draft.recovery-'))!;
     expect(await readFile(join(directory, recovery), 'utf8')).toBe('{damaged but valuable');
   });
+  it('loads older settings with a separate default revision wait without changing their saved debounce', async () => {
+    const { revisionDebounceMs: _unused, ...legacy } = defaultSettings;
+    await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...legacy, debounceMs: 1900 }));
+    const restarted = new LocalStore(directory); await restarted.init();
+    expect(restarted.settings.debounceMs).toBe(1900); expect(restarted.settings.revisionDebounceMs).toBe(3000); expect(restarted.notice).toBeUndefined();
+  });
+  it('derives saved-to-file status from the actual file association, including legacy drafts', async () => {
+    const doc: WritingDocument = { id: crypto.randomUUID(), name: '未命名.md', text: '', task: '', mode: 'email', dirty: false };
+    const documents = new Documents(store, () => ({} as Electron.BrowserWindow));
+    await store.saveDraft(doc, null, ''); expect((await documents.restore())?.hasFile).toBe(false);
+    const path = join(directory, '未命名.md'); await writeFile(path, '');
+    await store.saveDraft(doc, path, ''); expect((await documents.restore())?.hasFile).toBe(true);
+    electron.dialog.showSaveDialog.mockResolvedValue({ canceled: true });
+    expect(await documents.save({ ...doc, id: crypto.randomUUID() }, false)).toBeNull();
+  });
 });

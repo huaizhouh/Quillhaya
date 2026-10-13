@@ -63,12 +63,13 @@ export type ModelProfile = z.infer<typeof ProfileSchema>;
 export const SettingsSchema = z.object({
   theme: z.enum(['system', 'light', 'dark']), fontSize: z.number().int().min(14).max(26),
   debounceMs: z.number().int().min(300).max(10_000), autoAnalyze: z.boolean(),
+  revisionDebounceMs: z.number().int().min(1000).max(30_000).default(3000),
   defaultProfileId: z.string().max(100), profiles: z.array(ProfileSchema).min(1).max(25)
 }).strict().refine(s => s.profiles.some(p => p.id === s.defaultProfileId) && new Set(s.profiles.map(p => p.id)).size === s.profiles.length, '默认配置不存在或配置 ID 重复');
 export type Settings = z.infer<typeof SettingsSchema>;
 export const DocumentSchema = z.object({
   id: z.string().uuid(), text: z.string().max(500_000), task: z.string().max(6000),
-  mode: ModeSchema, name: z.string().max(300), dirty: z.boolean()
+  mode: ModeSchema, name: z.string().max(300), dirty: z.boolean(), hasFile: z.boolean().optional()
 }).strict();
 export type WritingDocument = z.infer<typeof DocumentSchema>;
 export type MenuCommand = 'new' | 'open' | 'save' | 'saveAs' | 'settings' | 'close';
@@ -90,7 +91,7 @@ export function makeProfile(kind: ModelProfile['kind'], id = kind as string): Mo
   const p = presetInfo[kind];
   return { id, kind, name: p.name, baseUrl: p.url, model: p.model, auth: p.auth, envKey: p.envKey, authHeader: 'x-api-key', headers: {}, temperature: null, timeoutMs: 30_000, mockBehavior: 'normal' };
 }
-export const defaultSettings: Settings = { theme: 'system', fontSize: 18, debounceMs: 1200, autoAnalyze: true, defaultProfileId: 'mock', profiles: [makeProfile('mock')] };
+export const defaultSettings: Settings = { theme: 'system', fontSize: 18, debounceMs: 1200, revisionDebounceMs: 3000, autoAnalyze: true, defaultProfileId: 'mock', profiles: [makeProfile('mock')] };
 
 export interface DesktopAPI {
   bootstrap(): Promise<Reply<Bootstrap>>;

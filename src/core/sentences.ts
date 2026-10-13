@@ -44,7 +44,7 @@ function boundary(text: string, i: number): boolean {
 }
 
 /** Conservative: prose intersecting code/links is skipped, not spliced into fake sentences. */
-export function splitSentences(text: string): Sentence[] {
+export function splitSentences(text: string, mode: 'discussion' | 'email' | 'general' = 'general'): Sentence[] {
   const excluded = markdownExclusions(text);
   const mask = new Uint8Array(text.length);
   for (const span of excluded) mask.fill(1, span.from, span.to);
@@ -60,7 +60,15 @@ export function splitSentences(text: string): Sentence[] {
     results.push({ id: '', text: text.slice(from, to), from, to, complete });
   };
   for (let i = 0; i < text.length; i++) {
-    if (text[i] === '\n') { emit(i, false); start = i + 1; continue; }
+    if (text[i] === '\n') {
+      // An email salutation and its following opening sentence form one review
+      // unit. Keep the exact newline/offsets, including CRLF and a blank line.
+      const salutation = text.slice(start, i).trim();
+      const next = text.slice(i + 1).match(/^(?:[ \t]*\r?\n)?[ \t]*([^\r\n]+)/)?.[1];
+      const emailOpening = mode === 'email' && /^(?:(?:Dear|Hi|Hello|Hey)\b[^\r\n,]{0,100}|To whom it may concern),$/i.test(salutation);
+      if (emailOpening && next && !/^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|`|~{3})/.test(next) && !mask.slice(start, i).some(Boolean)) continue;
+      emit(i, false); start = i + 1; continue;
+    }
     if (!mask[i] && boundary(text, i)) {
       let end = i + 1;
       while (end < text.length && /["'”’)]/.test(text[end])) end++;

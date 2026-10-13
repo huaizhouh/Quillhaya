@@ -41,3 +41,16 @@ describe('checked replacement', () => {
     expect(checkedReplacement('Hi.', -1, 3, 'Hi.', 'Hello.')).toBeNull();
   });
 });
+
+describe('email opening review units', () => {
+  it.each(['Dear Alex,\nHello.', 'Dear Dr. Smith,\r\n\r\nHello.', 'Hello Alex,\nI hope you are well.'])('joins the salutation without changing UTF-16 offsets: %s', text => {
+    const entries = splitSentences(text, 'email');
+    expect(entries).toHaveLength(1); expect(entries[0]).toMatchObject({ text, complete: true, from: 0, to: text.length });
+  });
+  it('keeps uncompleted openings incomplete and preserves normal/Markdown paragraph boundaries', () => {
+    expect(splitSentences('Dear Alex,\nI hope', 'email')).toMatchObject([{ text: 'Dear Alex,\nI hope', complete: false }]);
+    expect(splitSentences('Dear Alex,\nHello.', 'general')).toHaveLength(2);
+    expect(splitSentences('Dear Alex,\n# Heading\nHello.', 'email').map(s => s.text)).toEqual(['Dear Alex,', 'Hello.']);
+    expect(splitSentences('A fragment\nAnother fragment', 'email')).toHaveLength(2);
+  });
+});

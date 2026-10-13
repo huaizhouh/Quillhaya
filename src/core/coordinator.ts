@@ -1,7 +1,12 @@
 import type { AnalysisProgress, AnalysisRequest, AnalysisResult, DesktopAPI, Failure, WritingMode } from '../models/schema';
 import { splitSentences, type Sentence } from './sentences';
-export type FeedbackEntry = Sentence & { signature: string; contextSignature?: string; reviewedContext?: string; contextChanged?: boolean; state: 'pending' | 'queued' | 'analyzing' | 'done' | 'error'; result?: AnalysisResult; error?: Failure; requestId?: string; ignored?: boolean };
+export type FeedbackEntry = Sentence & { signature: string; contextSignature?: string; reviewedContext?: string; contextChanged?: boolean; textChanged?: boolean; edited?: boolean; contextSnapshot?: AnalysisRequest['context']; state: 'pending' | 'queued' | 'analyzing' | 'done' | 'error'; result?: AnalysisResult; error?: Failure; requestId?: string; ignored?: boolean };
 export type AnalysisContext = { documentId: string; revision: number; mode: WritingMode; task: string; profileId: string; configVersion: number };
+
+function surrounding(sentences: Sentence[], index: number) {
+  return { before: sentences.slice(0, index).filter(s => s.complete).slice(-2).map(s => s.text.slice(0, 3000)),
+    after: sentences.slice(index + 1).filter(s => s.complete).slice(0, 1).map(s => s.text.slice(0, 3000)) };
+}
 
 export class AnalysisCoordinator {
   private entries: FeedbackEntry[] = [];
@@ -11,19 +16,22 @@ export class AnalysisCoordinator {
   private cache = new Map<string, AnalysisResult>();
   private timer?: ReturnType<typeof setTimeout>;
   private completionTimer?: ReturnType<typeof setTimeout>;
+  private revisionTimer?: ReturnType<typeof setTimeout>;
   private enabled = true;
   private disposed = false;
   private debounceMs = 1200;
+  private revisionDebounceMs = 3000;
   constructor(private api: Pick<DesktopAPI, 'analyze' | 'cancel'>, private publish: (entries: FeedbackEntry[]) => void) {}
-  configure(enabled: boolean, debounceMs: number) {
+  configure(enabled: boolean, debounceMs: number, revisionDebounceMs = 3000) {
     const resumed = !this.enabled && enabled;
-    this.enabled = enabled; this.debounceMs = debounceMs;
+    this.enabled = enabled; this.debounceMs = debounceMs; this.revisionDebounceMs = revisionDebounceMs;
     if (!enabled) { this.clearTimers(); this.cancelAll(); this.emit(); }
     if (resumed) this.schedule();
   }
   update(text: string, context: AnalysisContext, composing = false) {
     if (this.disposed) return;
     const switched = this.context?.documentId !== context.documentId;
+    const sameConfiguration = !switched && this.context?.mode === context.mode && this.context?.task === context.task && this.context?.profileId === context.profileId && this.context?.configVersion === context.configVersion;
     if (switched) { this.cancelAll(); this.entries = []; this.cache.clear(); }
     const previousText = switched ? '' : this.text;
     // Only newly inserted sentence terminators qualify for the short trigger.
@@ -33,12 +41,22 @@ export class AnalysisCoordinator {
     while (oldEnd > changedFrom && changedTo > changedFrom && previousText[oldEnd - 1] === text[changedTo - 1]) { oldEnd--; changedTo--; }
     this.context = context; this.text = text;
     const old = [...this.entries];
-    const sentences = splitSentences(text);
+    const sentences = splitSentences(text, context.mode);
+    // Reserve exact matches first, so an edited sentence cannot steal an
+    // unchanged neighbor's feedback. Carry reviews only across an unambiguous
+    // one-to-one edit; splits/merges are new review units.
+    const matched = sentences.map(sentence => {
+      const found = old.findIndex(entry => entry.text === sentence.text);
+      return found >= 0 ? old.splice(found, 1)[0] : undefined;
+    });
+    const changedOld = old.filter(entry => entry.from <= oldEnd && entry.to >= changedFrom);
+    const changedNew = sentences.map((sentence, index) => ({ sentence, index })).filter(({ sentence, index }) => !matched[index] && sentence.from <= changedTo && sentence.to >= changedFrom);
+    if (changedOld.length === 1 && changedNew.length === 1) {
+      matched[changedNew[0].index] = changedOld[0]; old.splice(old.indexOf(changedOld[0]), 1);
+    }
     this.entries = sentences.map((sentence, index) => {
-      const found = old.findIndex(e => e.text === sentence.text);
-      const previous = found >= 0 ? old.splice(found, 1)[0] : undefined;
-      const before = sentences.slice(Math.max(0, index - 2), index).filter(s => s.complete).map(s => s.text.slice(0, 3000));
-      const after = sentences.slice(index + 1, index + 2).filter(s => s.complete).map(s => s.text.slice(0, 3000));
+      const previous = matched[index];
+      const { before, after } = surrounding(sentences, index);
       const contextSignature = JSON.stringify([before, after]);
       // Neighbor edits mark existing reviews stale; only the current text or
       // analysis settings invalidate the review itself. Refresh is explicit.
@@ -47,7 +65,13 @@ export class AnalysisCoordinator {
       if (previous?.signature === signature) return { ...previous, ...sentence, id, contextSignature, contextChanged: previous.reviewedContext !== undefined && previous.reviewedContext !== contextSignature };
       if (previous?.requestId) void this.api.cancel(previous.requestId);
       const cached = this.cache.get(JSON.stringify([signature, contextSignature]));
-      return { ...sentence, id, signature, contextSignature, reviewedContext: cached ? contextSignature : undefined, contextChanged: false, ignored: previous?.ignored, state: cached ? 'done' : 'pending', result: cached ? { ...cached, sentence_id: id } : undefined };
+      const retained = sameConfiguration ? previous?.result : undefined;
+      const result = cached ? { ...cached, sentence_id: id } : retained;
+      return { ...sentence, id, signature, contextSignature, reviewedContext: cached ? contextSignature : retained ? previous?.reviewedContext : undefined,
+        contextSnapshot: cached ? { before, after, task: context.task } : retained ? previous?.contextSnapshot : undefined,
+        contextChanged: Boolean(!cached && retained && previous?.reviewedContext !== contextSignature), textChanged: Boolean(result && result.original_text !== sentence.text),
+        edited: Boolean(previous && previous.text !== sentence.text && (previous.complete || previous.result || previous.requestId || previous.edited)),
+        ignored: previous?.text === sentence.text ? previous.ignored : false, state: cached ? 'done' : 'pending', result };
     });
     for (const removed of old) if (removed.requestId) void this.api.cancel(removed.requestId);
     this.emit();
@@ -55,7 +79,7 @@ export class AnalysisCoordinator {
     const completed = this.entries.filter(entry => {
       const ending = /[.!?]["'”’)]*$/.exec(entry.text);
       const position = entry.from + (ending?.index ?? -1);
-      return entry.complete && ending && position >= changedFrom && position < changedTo;
+      return !entry.edited && entry.complete && ending && position >= changedFrom && position < changedTo;
     }).map(entry => entry.id);
     if (this.enabled && !composing) this.schedule(completed);
   }
@@ -64,7 +88,11 @@ export class AnalysisCoordinator {
     if (completed.length) this.completionTimer = setTimeout(() => {
       for (const id of completed) if (this.get(id)?.state === 'pending') this.analyze(undefined, id);
     }, 220);
-    this.timer = setTimeout(() => this.analyze(), this.debounceMs);
+    this.timer = setTimeout(() => this.analyzePending(false), this.debounceMs);
+    this.revisionTimer = setTimeout(() => this.analyzePending(true), this.revisionDebounceMs);
+  }
+  private analyzePending(edited: boolean) {
+    for (const entry of this.entries) if (entry.state === 'pending' && Boolean(entry.edited) === edited) this.analyze(undefined, entry.id);
   }
   analyze(range?: { from: number; to: number }, retryId?: string) {
     for (const e of this.entries) {
@@ -99,7 +127,7 @@ export class AnalysisCoordinator {
       request_id: requestId, document_id: context.documentId, revision_id: context.revision,
       sentence_id: entry.id, original_text: entry.text, from: entry.from, to: entry.to,
       mode: context.mode, scope: 'sentence', profile_id: context.profileId,
-      context: { before: this.entries.slice(Math.max(0, index - 2), index).filter(s => s.complete).map(s => s.text.slice(0, 3000)), after: this.entries.slice(index + 1, index + 2).filter(s => s.complete).map(s => s.text.slice(0, 3000)), task: context.task }
+      context: { ...surrounding(this.entries, index), task: context.task }
     };
     let reply;
     try { reply = await this.api.analyze(request); }
@@ -110,18 +138,18 @@ export class AnalysisCoordinator {
     current.requestId = undefined;
     if (reply.ok) {
       if (reply.value.original_text !== current.text || reply.value.sentence_id !== current.id) return;
-      current.result = reply.value; current.state = 'done';
+      current.result = reply.value; current.state = 'done'; current.textChanged = false; current.edited = false; current.contextSnapshot = request.context;
       current.reviewedContext = reviewedContext; current.contextChanged = current.contextSignature !== reviewedContext;
       this.cache.set(JSON.stringify([signature, reviewedContext]), reply.value);
       if (this.cache.size > 300) this.cache.delete(this.cache.keys().next().value!);
-    } else if (reply.error.code === 'cancelled') current.state = current.result ? 'done' : 'pending';
+    } else if (reply.error.code === 'cancelled') current.state = current.result && !current.textChanged ? 'done' : 'pending';
     else { current.state = 'error'; current.error = reply.error; }
     this.emit();
   }
   private cancelAll() {
-    for (const e of this.entries) if (e.requestId) { void this.api.cancel(e.requestId); e.requestId = undefined; e.state = e.result ? 'done' : 'pending'; }
+    for (const e of this.entries) if (e.requestId) { void this.api.cancel(e.requestId); e.requestId = undefined; e.state = e.result && !e.textChanged ? 'done' : 'pending'; }
   }
   private emit() { if (!this.disposed) this.publish(this.entries.map(e => ({ ...e }))); }
-  private clearTimers() { clearTimeout(this.timer); clearTimeout(this.completionTimer); }
+  private clearTimers() { clearTimeout(this.timer); clearTimeout(this.completionTimer); clearTimeout(this.revisionTimer); }
   dispose() { this.disposed = true; this.clearTimers(); this.cancelAll(); }
 }

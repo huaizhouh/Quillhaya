@@ -12,11 +12,11 @@ export class Documents {
     const draft = await this.store.loadDraft();
     if (!draft) return null;
     if (draft.path) this.files.set(draft.document.id, { path: draft.path, savedText: draft.savedText });
-    return draft.document;
+    return { ...draft.document, hasFile: Boolean(draft.path) };
   }
   async draft(document: WritingDocument) {
     const file = this.files.get(document.id);
-    await this.store.saveDraft(document, file?.path ?? null, file?.savedText ?? '');
+    await this.store.saveDraft({ ...document, hasFile: Boolean(file) }, file?.path ?? null, file?.savedText ?? '');
   }
   async open(): Promise<WritingDocument | null> {
     const result = await dialog.showOpenDialog(this.window(), { title: '打开 Markdown 文档', properties: ['openFile'], filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }] });
@@ -27,7 +27,7 @@ export class Documents {
     let text: string;
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/\r\n?/g, '\n'); } catch { throw new AppError('encoding', '文件不是有效 UTF-8，请转换编码后重新打开。'); }
     if (text.length > 500_000) throw new AppError('file_size', '文件超过 500,000 字符，无法打开。');
-    const doc: WritingDocument = { id: crypto.randomUUID(), text, task: '', mode: 'discussion', name: basename(path), dirty: false };
+    const doc: WritingDocument = { id: crypto.randomUUID(), text, task: '', mode: 'discussion', name: basename(path), dirty: false, hasFile: true };
     this.files.set(doc.id, { path, savedText: bytes.toString('utf8') });
     await this.draft(doc);
     return doc;

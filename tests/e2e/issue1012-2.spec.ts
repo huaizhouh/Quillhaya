@@ -58,7 +58,7 @@ test('issue1012_2: existing sentence edits wait for idle instead of submitting e
     await editor.focus(); await page.keyboard.press('End'); await page.keyboard.press('ArrowLeft');
     await editor.pressSequentially(' together', { delay: 300 });
     expect(server.state.requests.filter(r => r.text).map(r => r.text)).toEqual(['We learn.']);
-    await expect(page.getByTestId('feedback-card').locator('.card-status')).toContainText('待分析');
+    await expect(page.getByTestId('feedback-card').locator('.card-status')).toContainText('保留上次意见');
     await expect.poll(() => server.state.requests.filter(r => r.text).map(r => r.text)).toEqual(['We learn.', 'We learn together.']);
     await expect(editor).toBeFocused(); await expect(editor).toHaveText('We learn together.');
   } finally { await server.close(); }
