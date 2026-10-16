@@ -37,7 +37,7 @@ describe('non-blocking coordinator', () => {
     const firstId = t.entries[0].id;
     t.engine.update('We learn. Practice helps.', { ...context, revision: 2 }); await vi.advanceTimersByTimeAsync(1500);
     expect(t.requests.map(({ r }) => r.original_text)).toEqual(['We learn.', 'Practice helps.']);
-    expect(t.entries[0]).toMatchObject({ id: firstId, state: 'done' });
+    expect(t.entries[0]).toMatchObject({ id: firstId, state: 'done', contextChanged: false });
     t.engine.update('We learn. Practice helps us.', { ...context, revision: 3 }); await vi.advanceTimersByTimeAsync(1500);
     expect(t.entries[0]).toMatchObject({ id: firstId, state: 'done' });
     expect(t.api.cancel).not.toHaveBeenCalledWith(t.requests[0].r.request_id); t.engine.dispose();
@@ -52,7 +52,21 @@ describe('non-blocking coordinator', () => {
     expect(t.entries.map(e => e.state)).toEqual(['analyzing', 'queued']);
     t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
     t.engine.progress({ requestId: t.requests[0].r.request_id, phase: 'running' });
-    expect(t.entries[0].state).toBe('done'); t.engine.dispose();
+    expect(t.entries[0]).toMatchObject({ state: 'done', contextChanged: false }); t.engine.dispose();
+  });
+  it('ignores newly available following context until reviewed, but flags changes to reviewed neighbors', async () => {
+    const t = setup(); t.engine.update('We learn. Practice', context); await vi.advanceTimersByTimeAsync(220);
+    t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
+    t.engine.update('We learn. Practice helps.', { ...context, revision: 2 });
+    expect(t.entries[0].contextChanged).toBe(false);
+    expect(t.entries[0].contextSnapshot?.after).toEqual([]);
+    t.engine.analyze(undefined, t.entries[0].id);
+    expect(t.requests[1].r.context.after).toEqual(['Practice helps.']);
+    t.requests[1].d.resolve({ ok: true, value: good(t.requests[1].r) }); await vi.advanceTimersByTimeAsync(0);
+    t.engine.update('We learn. Practice helps everyone.', { ...context, revision: 3 });
+    expect(t.entries[0].contextChanged).toBe(true);
+    t.engine.update('We learn. Practice helps.', { ...context, revision: 4 });
+    expect(t.entries[0].contextChanged).toBe(false); t.engine.dispose();
   });
   it('retains neighbor feedback until an explicit refresh, using the latest context', async () => {
     const t = setup(); t.engine.update('We learn. Practice helps.', context); await vi.advanceTimersByTimeAsync(220);

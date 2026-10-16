@@ -80,4 +80,24 @@ describe('document and settings persistence', () => {
     electron.dialog.showSaveDialog.mockResolvedValue({ canceled: true });
     expect(await documents.save({ ...doc, id: crypto.randomUUID() }, false)).toBeNull();
   });
+  it('keeps the actual saved name and clean state when closing with a pre-save snapshot', async () => {
+    const doc: WritingDocument = { id: crypto.randomUUID(), name: '未命名.md', text: 'My saved letter.', task: '', mode: 'email', dirty: true, hasFile: false };
+    const path = join(directory, 'letter.md');
+    electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: path });
+    const documents = new Documents(store, () => ({} as Electron.BrowserWindow));
+    await documents.save(doc, false);
+    await documents.draft(doc); // app:close used to send the renderer's pre-save snapshot.
+    const restored = await new Documents(store, () => ({} as Electron.BrowserWindow)).restore();
+    expect(restored).toMatchObject({ name: 'letter.md', dirty: false, hasFile: true, text: doc.text });
+    expect((await store.loadDraft())?.path).toBe(path);
+  });
+  it('repairs legacy saved metadata and retains genuinely newer draft text with BOM/CRLF files', async () => {
+    const doc: WritingDocument = { id: crypto.randomUUID(), name: '未命名.md', text: 'First.\nSecond.', task: '', mode: 'email', dirty: true, hasFile: false };
+    const path = join(directory, 'letter.md'), savedText = '\uFEFFFirst.\r\nSecond.';
+    await store.saveDraft(doc, path, savedText);
+    const documents = new Documents(store, () => ({} as Electron.BrowserWindow));
+    expect(await documents.restore()).toMatchObject({ name: 'letter.md', dirty: false, hasFile: true });
+    await documents.draft({ ...doc, text: doc.text + '\nNew words.', dirty: false });
+    expect((await store.loadDraft())?.document).toMatchObject({ name: 'letter.md', dirty: true, text: doc.text + '\nNew words.' });
+  });
 });

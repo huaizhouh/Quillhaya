@@ -117,7 +117,12 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
     if (!reply.ok) { notify(reply.error.message); return false; }
     if (!reply.value) return false;
     const name = reply.value.name;
-    setDoc(current => current.id === snapshot.id ? { ...current, name, dirty: current.text !== snapshot.text, hasFile: true } : current);
+    const current = docRef.current;
+    if (current.id === snapshot.id) {
+      const next = { ...current, name, dirty: current.text !== snapshot.text, hasFile: true };
+      // canLeave() may immediately continue to close(), before React renders.
+      docRef.current = next; setDoc(next);
+    }
     if (docRef.current.id === snapshot.id && docRef.current.text !== snapshot.text) {
       notify('已保存先前版本；保存期间的新输入仍在编辑器中，请再次保存。'); return false;
     }

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:http';
+import { writeEditor } from './editor';
 
 let app: ElectronApplication;
 let page: Page;
@@ -16,7 +17,7 @@ async function launch(directory: string) {
 }
 test.beforeEach(async () => { userData = await mkdtemp(join(tmpdir(), 'twa-e2e-')); await launch(userData); });
 test.afterEach(async () => { if (app) await app.evaluate(({ app: main }) => main.exit(0)).catch(() => {}); });
-async function write(text: string) { const editor = page.getByTestId('writing-editor'); await editor.fill(text); await editor.focus(); }
+async function write(text: string) { await writeEditor(page, text); }
 async function chooseMockBehavior(value: string) {
   await page.getByRole('button', { name: '打开设置' }).click();
   await page.getByLabel('模拟响应').selectOption(value);

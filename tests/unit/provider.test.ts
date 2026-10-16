@@ -139,4 +139,24 @@ describe('OpenAI-compatible provider', () => {
     const result = await new CompatibleProvider(testProfile, undefined, fetcher).analyze(input, signal());
     expect(result.issues[1]).toMatchObject({ type: 'grammar', severity: 'error', original_span: 'trouble' }); expect(fetcher).toHaveBeenCalledTimes(2);
   });
+  it('retains an omitted optional issue only when its literal edit is still applied in the audited revision', async () => {
+    const input = request('He go to work every day on a daily basis.');
+    const grammar = { type: 'grammar', severity: 'error', original_span: 'go', suggested_text: 'goes', explanation_zh: '第三人称单数用 goes。' };
+    const style = { type: 'conciseness', severity: 'improvement', original_span: 'on a daily basis', suggested_text: '', explanation_zh: '与 every day 重复，可以删除。' };
+    const first = { ...good(input), status: 'needs_revision', suggested_revision: 'He goes to work every day.', issues: [grammar, style] };
+    const response = (value: unknown) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(value) } }] }));
+    const fetcher = vi.fn().mockResolvedValueOnce(response(first)).mockResolvedValueOnce(response({ ...first, issues: [grammar] }));
+    const result = await new CompatibleProvider(testProfile, undefined, fetcher).analyze(input, signal());
+    expect(result.issues).toEqual(first.issues); expect(result.suggested_revision).toBe(first.suggested_revision); expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it.each(['not adopted', 'ambiguous'])('does not restore an optional edit that is %s', async kind => {
+    const input = request(kind === 'ambiguous' ? 'He go home home.' : 'He go home every day.');
+    const grammar = { type: 'grammar', severity: 'error', original_span: 'go', suggested_text: 'goes', explanation_zh: '第三人称单数用 goes。' };
+    const style = { type: 'conciseness', severity: 'improvement', original_span: kind === 'ambiguous' ? 'home' : 'every day', suggested_text: '', explanation_zh: '可选删除。' };
+    const first = { ...good(input), status: 'needs_revision', suggested_revision: 'He goes home.', issues: [grammar, style] };
+    const last = { ...first, issues: [grammar], suggested_revision: kind === 'ambiguous' ? 'He goes home.' : 'He goes home every day.' };
+    const response = (value: unknown) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(value) } }] }));
+    const fetcher = vi.fn().mockResolvedValueOnce(response(first)).mockResolvedValueOnce(response(last));
+    expect((await new CompatibleProvider(testProfile, undefined, fetcher).analyze(input, signal())).issues).toEqual([grammar]);
+  });
 });

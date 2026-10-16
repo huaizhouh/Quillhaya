@@ -8,15 +8,23 @@ import type { LocalStore } from './store';
 export class Documents {
   private files = new Map<string, { path: string; savedText: string }>();
   constructor(private store: LocalStore, private window: () => BrowserWindow) {}
+  private fileState(document: WritingDocument): WritingDocument {
+    const file = this.files.get(document.id);
+    if (!file) return { ...document, hasFile: false };
+    const savedText = file.savedText.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+    return { ...document, name: basename(file.path), hasFile: true, dirty: document.text !== savedText };
+  }
   async restore() {
     const draft = await this.store.loadDraft();
     if (!draft) return null;
     if (draft.path) this.files.set(draft.document.id, { path: draft.path, savedText: draft.savedText });
-    return { ...draft.document, hasFile: Boolean(draft.path) };
+    return this.fileState(draft.document);
   }
   async draft(document: WritingDocument) {
     const file = this.files.get(document.id);
-    await this.store.saveDraft({ ...document, hasFile: Boolean(file) }, file?.path ?? null, file?.savedText ?? '');
+    // A late renderer snapshot must not undo a successful save's name/clean
+    // state. Derive metadata from the main-process file association and text.
+    await this.store.saveDraft(this.fileState(document), file?.path ?? null, file?.savedText ?? '');
   }
   async open(): Promise<WritingDocument | null> {
     const result = await dialog.showOpenDialog(this.window(), { title: '打开 Markdown 文档', properties: ['openFile'], filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }] });

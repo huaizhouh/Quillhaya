@@ -8,6 +8,15 @@ function surrounding(sentences: Sentence[], index: number) {
     after: sentences.slice(index + 1).filter(s => s.complete).slice(0, 1).map(s => s.text.slice(0, 3000)) };
 }
 
+function contextChanged(reviewed: AnalysisRequest['context'] | undefined, current: ReturnType<typeof surrounding>) {
+  if (!reviewed) return false;
+  // A following sentence written after this review is new information, not an
+  // edit to its evidence. Compare following context only if it was actually sent.
+  // Keep the full context in requests/cache keys so a manual refresh uses it.
+  return JSON.stringify(reviewed.before) !== JSON.stringify(current.before) ||
+    (reviewed.after.length > 0 && JSON.stringify(reviewed.after) !== JSON.stringify(current.after));
+}
+
 export class AnalysisCoordinator {
   private entries: FeedbackEntry[] = [];
   private context?: AnalysisContext;
@@ -62,14 +71,14 @@ export class AnalysisCoordinator {
       // analysis settings invalidate the review itself. Refresh is explicit.
       const signature = JSON.stringify([sentence.text, context.mode, context.task, context.profileId, context.configVersion]);
       const id = previous?.id ?? `s-${++this.counter}`;
-      if (previous?.signature === signature) return { ...previous, ...sentence, id, contextSignature, contextChanged: previous.reviewedContext !== undefined && previous.reviewedContext !== contextSignature };
+      if (previous?.signature === signature) return { ...previous, ...sentence, id, contextSignature, contextChanged: contextChanged(previous.contextSnapshot, { before, after }) };
       if (previous?.requestId) void this.api.cancel(previous.requestId);
       const cached = this.cache.get(JSON.stringify([signature, contextSignature]));
       const retained = sameConfiguration ? previous?.result : undefined;
       const result = cached ? { ...cached, sentence_id: id } : retained;
       return { ...sentence, id, signature, contextSignature, reviewedContext: cached ? contextSignature : retained ? previous?.reviewedContext : undefined,
         contextSnapshot: cached ? { before, after, task: context.task } : retained ? previous?.contextSnapshot : undefined,
-        contextChanged: Boolean(!cached && retained && previous?.reviewedContext !== contextSignature), textChanged: Boolean(result && result.original_text !== sentence.text),
+        contextChanged: Boolean(!cached && retained && contextChanged(previous?.contextSnapshot, { before, after })), textChanged: Boolean(result && result.original_text !== sentence.text),
         edited: Boolean(previous && previous.text !== sentence.text && (previous.complete || previous.result || previous.requestId || previous.edited)),
         ignored: previous?.text === sentence.text ? previous.ignored : false, state: cached ? 'done' : 'pending', result };
     });
@@ -139,7 +148,7 @@ export class AnalysisCoordinator {
     if (reply.ok) {
       if (reply.value.original_text !== current.text || reply.value.sentence_id !== current.id) return;
       current.result = reply.value; current.state = 'done'; current.textChanged = false; current.edited = false; current.contextSnapshot = request.context;
-      current.reviewedContext = reviewedContext; current.contextChanged = current.contextSignature !== reviewedContext;
+      current.reviewedContext = reviewedContext; current.contextChanged = contextChanged(request.context, surrounding(this.entries, this.entries.indexOf(current)));
       this.cache.set(JSON.stringify([signature, reviewedContext]), reply.value);
       if (this.cache.size > 300) this.cache.delete(this.cache.keys().next().value!);
     } else if (reply.error.code === 'cancelled') current.state = current.result && !current.textChanged ? 'done' : 'pending';
