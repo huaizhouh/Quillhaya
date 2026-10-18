@@ -13,8 +13,9 @@ import { AppError, failure } from './llm/errors';
 
 const here = dirname(fileURLToPath(import.meta.url));
 app.setName('TOEFL Writing Assistant');
-// Dedicated storage for automated tests; never touches a user's actual drafts.
-if (process.env.TWA_TEST_USER_DATA) app.setPath('userData', process.env.TWA_TEST_USER_DATA);
+// Keep the existing storage location when the packaged product name changes.
+// Automated tests always override it with an isolated temporary directory.
+app.setPath('userData', process.env.TWA_TEST_USER_DATA || join(app.getPath('appData'), 'TOEFL Writing Assistant'));
 let window: BrowserWindow | null = null;
 let allowClose = false;
 let quitRequested = false;

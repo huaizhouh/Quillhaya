@@ -32,6 +32,20 @@ npm start
 
 `build` 仅生成 `out/` 中的 JS、HTML、CSS，不生成 `.app`、DMG，不签名、不公证。`node_modules/electron/dist/Electron.app` 是下载的 Electron 开发运行时，不是本项目的应用打包产物。
 
+## 打包 Apple Silicon 应用
+
+在 macOS 上安装依赖后执行：
+
+```bash
+npm run pack:mac       # 生成 dist/mac-arm64/Writing Assistant.app
+npm run dist:mac       # 生成上述 .app 和 dist/Writing Assistant-1.0.0-arm64.dmg
+npm run test:package   # 使用临时用户目录验证已生成的 .app
+```
+
+`package.json` 的 `build` 配置已设置 `appId: com.zloyan.writingassistant`、`productName: Writing Assistant`，目标架构为 Apple Silicon `arm64`。`mac.category` 是应用用途分类，因此设为 `public.app-category.productivity`（效率工具），不是 CPU 类型；`mac.icon` 暂为 `null`，使用 Electron 默认图标。配置字段见 [electron-builder macOS 文档](https://www.electron.build/v26/docs/mac/)。
+
+当前产物采用本机 ad-hoc 签名，未使用 Developer ID 证书、未公证；打包命令不发布。正式对外分发前需配置自己的签名、公证和图标。打包只包含编译产物、包元数据及生产依赖，源码目录中的作文、issue 和配置文件不会被一并打入。运行时沿用 `~/Library/Application Support/TOEFL Writing Assistant`，以便继续读取现有模型配置和草稿。
+
 ## 先试一下
 
 默认启用 **Mock 演示**，不需要密钥，不发送网络请求。点击“体验示例反馈”，或输入：
@@ -96,7 +110,7 @@ Temperature 留空时不发送该参数。附加 Headers 仅用于非密钥信�
 
 正文中的红色波浪线表示客观错误，黄色虚线表示可选优化；悬停可查看类别。同一句兼有两类建议时优先显示客观错误，细节仍在反馈卡片中。
 
-侧栏可以拖动改变宽度，分隔线也支持键盘左右方向键；折叠仍继续分析。暂停按钮会取消待处理请求；用户仍能手动分析选区或全文。忽略的句子在本次会话中保持隐藏，直到该句内容变化。主题支持跟随系统/浅色/深色，字号可调。
+侧栏可以拖动改变宽度，分隔线也支持键盘左右方向键；折叠仍继续分析。暂停按钮会取消待处理请求；用户仍能手动分析选区或全文。忽略句子后，侧栏保留原句、顺序和“已忽略”状态，移除评价、正文下划线及相关统计；原句未改变时不自动重评。点击该卡片“重新评估”或修改原句可恢复分析。主题支持跟随系统/浅色/深色，字号可调。
 
 文件使用 UTF-8，支持新建、打开、保存、另存为；保留已打开文件的 BOM 和 CRLF 换行风格。写入先使用同目录临时文件，再原子替换。外部程序改动原文件时，保存前会提示是否覆盖。未保存内容在离开文档前有原生保存提示。
 
@@ -199,7 +213,7 @@ E2E 使用下载的 Electron 自身，不需要另外下载 Playwright Chromium�
 
 可选执行 `npm run test:ollama:balance`，检查 issue1014 的语法误报、可选优化保留及混合建议，沿用同样的本机配置与测试模型释放规则。
 
-最新三项修复的技术栈、根因、实现和验收步骤见 [issue1014 实现说明](docs/ISSUE1014-IMPLEMENTATION.md)；此前见 [issue1013 实现说明](docs/ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](docs/ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](docs/ISSUE1012-IMPLEMENTATION.md)，此前四项修复保留在 [历史修复说明](docs/FIXES-2026-10-12.md)。
+最新忽略行为修复与打包升级的技术栈、实现和验收步骤见 [issue1018 实现说明](docs/ISSUE1018-IMPLEMENTATION.md)；此前见 [issue1014 实现说明](docs/ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](docs/ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](docs/ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](docs/ISSUE1012-IMPLEMENTATION.md) 和 [历史修复说明](docs/FIXES-2026-10-12.md)。
 
 ## 故障排查
 
@@ -222,7 +236,7 @@ E2E 使用下载的 Electron 自身，不需要另外下载 Playwright Chromium�
 - 未实现 Markdown 渲染预览、模型列表自动发现和 Anthropic/Gemini 原生协议；编辑器本身有 Markdown 语法高亮。
 - 保守分句不覆盖所有英语语言现象；包含行内代码或 URL 的整句会被跳过。跨行未结束的句子暂按不完整片段处理。自动分句缓存、忽略状态及计时器只在本次会话中有效。
 - 本地文件上限 500,000 字符，单次全文分析上限 50,000 字符。为 TOEFL 篇幅设计，超长文档未做性能承诺。
-- 单窗口、单份最近草稿；不实现多文档标签、历史版本库、账号、同步、支付、多人协作或应用打包。
+- 单窗口、单份最近草稿；不实现多文档标签、历史版本库、账号、同步、支付或多人协作。已支持 macOS arm64 本地打包，未配置正式签名、公证和自动更新。
 - 自动化已覆盖组合态调度；真实系统输入法的所有候选窗行为仍需人工使用验证。
 
 ## 参考文档

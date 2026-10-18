@@ -107,11 +107,34 @@ describe('non-blocking coordinator', () => {
     t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
     expect(t.entries[0].result).toBeUndefined(); t.engine.dispose();
   });
-  it('moves offsets safely, reuses cache, and keeps ignored sentences hidden', async () => {
+  it('keeps ignored sentence entries without their review and skips automatic or selection analysis', async () => {
     const t = setup(); t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);
     t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
     t.engine.ignore(t.entries[0].id); t.engine.update('\nWe learn.', { ...context, revision: 2 }); await vi.advanceTimersByTimeAsync(2000);
-    expect(t.entries[0].from).toBe(1); expect(t.entries[0].ignored).toBe(true); expect(t.api.analyze).toHaveBeenCalledTimes(1); t.engine.dispose();
+    expect(t.entries).toHaveLength(1); expect(t.entries[0]).toMatchObject({ from: 1, ignored: true, text: 'We learn.' });
+    expect(t.entries[0].result).toBeUndefined();
+    t.engine.analyze({ from: 0, to: 10 });
+    expect(t.api.analyze).toHaveBeenCalledTimes(1);
+    t.engine.reevaluate(t.entries[0].id);
+    expect(t.entries[0]).toMatchObject({ ignored: false, state: 'queued' });
+    expect(t.api.analyze).toHaveBeenCalledTimes(2);
+    t.requests[1].d.resolve({ ok: true, value: good(t.requests[1].r) }); await vi.advanceTimersByTimeAsync(0);
+    expect(t.entries[0]).toMatchObject({ state: 'done', result: { status: 'good' } }); t.engine.dispose();
+  });
+  it('cancels an ignored refresh, rejects its late response, and resumes after the sentence changes', async () => {
+    const t = setup(); t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);
+    t.requests[0].d.resolve({ ok: true, value: good(t.requests[0].r) }); await vi.advanceTimersByTimeAsync(0);
+    const id = t.entries[0].id;
+    t.engine.reevaluate(id); t.engine.ignore(id);
+    expect(t.api.cancel).toHaveBeenCalledWith(t.requests[1].r.request_id);
+    t.requests[1].d.resolve({ ok: true, value: good(t.requests[1].r) }); await vi.advanceTimersByTimeAsync(3000);
+    expect(t.entries[0]).toMatchObject({ ignored: true, state: 'pending' });
+    expect(t.entries[0].result).toBeUndefined(); expect(t.entries[0].requestId).toBeUndefined();
+    expect(t.requests).toHaveLength(2);
+    t.engine.update('We learn more.', { ...context, revision: 2 });
+    expect(t.entries[0].ignored).toBe(false); expect(t.entries[0].result).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(t.requests).toHaveLength(3); expect(t.requests[2].r.original_text).toBe('We learn more.'); t.engine.dispose();
   });
   it('invalidates cached results after meaningful context changes', async () => {
     const t = setup(); t.engine.update('We learn.', context); await vi.advanceTimersByTimeAsync(220);

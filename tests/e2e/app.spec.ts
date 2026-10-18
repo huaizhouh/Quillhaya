@@ -140,12 +140,34 @@ test('editing during an in-flight request never shows or applies the old respons
   await expect(page.getByTestId('writing-editor')).toHaveText('He goes home.');
 });
 
-test('ignore stays hidden, collapse keeps analysis enabled, full review is explicit', async () => {
+test('issue1018: ignore retains the sentence, clears its feedback and marks, and allows reevaluation', async () => {
   await write('I am agree with you.');
-  await page.getByRole('button', { name: '忽略', exact: true }).click();
-  await expect(page.getByTestId('feedback-card')).toHaveCount(0);
+  const card = page.getByTestId('feedback-card').first();
+  await expect(card).toContainText('建议修改'); await expect(page.locator('.sentence-error')).toHaveCount(1);
+  await card.getByRole('button', { name: '详情' }).click();
+  await card.getByRole('button', { name: '忽略', exact: true }).click();
+  await expect(page.getByTestId('feedback-card')).toHaveCount(1);
+  await expect(card).toContainText('已忽略'); await expect(card.locator('.original-text')).toHaveText('I am agree with you.');
+  await expect(card.locator('.suggestion, .issue-tags, .issue-details, .card-description, .context-notice')).toHaveCount(0);
+  await expect(card.getByRole('button', { name: '接受修改', exact: true })).toHaveCount(0);
+  await expect(page.locator('.sentence-problem')).toHaveCount(0);
+  await expect(page.locator('.feedback-summary')).toContainText('0 条建议');
   await page.getByTestId('writing-editor').click(); await page.keyboard.press('Meta+End'); await page.keyboard.insertText(' ');
-  await expect(page.getByTestId('feedback-card')).toHaveCount(0);
+  await expect(card).toContainText('已忽略');
+  await write('I am agree with you. Learning takes practice.');
+  await expect(page.getByTestId('feedback-card')).toHaveCount(2);
+  await expect(page.getByTestId('feedback-card').nth(1)).toContainText('表达良好');
+  await expect(card).toContainText('已忽略');
+  await expect(page.getByTestId('feedback-card').nth(1).locator('.sentence-index')).toHaveText('02');
+  await card.getByRole('button', { name: '重新评估', exact: true }).click();
+  await expect(card).toContainText('建议修改'); await expect(page.locator('.sentence-error')).toHaveCount(1);
+  await card.getByRole('button', { name: '忽略', exact: true }).click();
+  await write('I agree with you. Learning takes practice.');
+  await expect(card).toContainText('表达良好'); await expect(card).not.toContainText('已忽略');
+  await expect(page.locator('.sentence-problem')).toHaveCount(0);
+});
+
+test('collapse keeps analysis enabled and full review is explicit', async () => {
   await page.getByRole('button', { name: '折叠反馈' }).click();
   await write('Learning takes practice.');
   await expect(page.getByLabel('AI Writing Feedback')).toHaveCount(0);

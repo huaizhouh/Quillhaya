@@ -1,0 +1,2 @@
+1 bug 右侧对某个句子点击忽略后，这个句子会从右边消失，正确的逻辑应该是保留在右边，并忽略其判定信息，包括解除其评价引起的正文中的下划线
+2 功能增加 我现在打算封装app，需要填写package.json信息，appId填com.zloyan.writingassistant, productName填 Writing Assistant, mac.category采用mac silicon芯片, mac.icon暂时留空

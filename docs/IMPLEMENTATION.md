@@ -2,7 +2,7 @@
 
 这份文档描述当前源码中**已经实现**的功能与方法，用于对照代码审阅。运行方式见 [README](../README.md)，实际测试记录见 [VALIDATION](VALIDATION.md)。
 
-最新 `issue/issue1014.md` 的三项修复、涉及文件与复验步骤见 [issue1014 实现说明](ISSUE1014-IMPLEMENTATION.md)。此前见 [issue1013 实现说明](ISSUE1013-IMPLEMENTATION.md)、 [issue1012_2 实现说明](ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](ISSUE1012-IMPLEMENTATION.md)，初次四项修复保留在 [历史修复说明](FIXES-2026-10-12.md)。沿用原有技术栈，没有增加运行时依赖。
+最新忽略行为修复与打包升级见 [issue1018 实现说明](ISSUE1018-IMPLEMENTATION.md)。此前见 [issue1014 实现说明](ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](ISSUE1012-IMPLEMENTATION.md)，初次四项修复保留在 [历史修复说明](FIXES-2026-10-12.md)。沿用原有运行时技术栈；新增 electron-builder 开发依赖用于打包。
 
 ## 1. 技术栈和选型
 
@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 开发运行环境 | Conda、Node.js 22.23.2、macOS arm64 | Conda 只负责 Node 环境；所有应用依赖由 npm 锁文件管理 |
 | 桌面框架 | Electron 44.7.0 | 原生窗口、macOS 菜单、文件对话框、受控文件与网络操作 |
-| 构建 | electron-vite 4.0.1、Vite 6.4.4 | 分别构建主进程、preload 和 renderer；不做应用打包 |
+| 构建 | electron-vite 4.0.1、Vite 6.4.4、electron-builder 26.15.3 | 构建主进程、preload 和 renderer；另可生成 macOS arm64 `.app` 和 DMG |
 | 语言 | TypeScript（严格类型检查） | 主进程、界面和共享协议统一类型；无 Python 后端 |
 | 界面 | React 19.3.0、HTML、CSS、lucide-react | 双栏布局、设置与反馈卡片；无需重型状态管理框架 |
 | 编辑器 | CodeMirror 6，view 6.43.14 | 可靠的文本状态、选区、撤销、Markdown 高亮与装饰 |
@@ -140,7 +140,7 @@ Email Writing 模式额外识别短称呼行，如 `Dear Alex,`、`Hi Alex,`、`
 
 当前句、题目、模式或当前模型参数发生变化时仍重新分析。主题、字号、停顿延迟、模型显示名称及非当前模型的修改不提升分析配置代数。主进程用忽略显示名称后的对象深比较判断当前模型参数是否变化，避免把 JSON 字段顺序变化误判为模型变化。
 
-缓存为最多 300 项的内存 `Map`，键同时包含句子身份和上下文签名，避免把旧上下文的缓存作为新评估结果。文档切换时清空；不写入磁盘。忽略状态绑定未改变的当前句子，在本次会话中保留。
+缓存为最多 300 项的内存 `Map`，键同时包含句子身份和上下文签名，避免把旧上下文的缓存作为新评估结果。文档切换时清空；不写入磁盘。忽略状态绑定未改变的当前句子，在本次会话中保留。忽略会清除当前评价和请求，保留侧栏原句卡片；忽略项不生成正文标记、不参与反馈统计，也不被自动或选区分析重新提交。卡片的 `reevaluate(id)` 显式解除忽略并重新请求，修改原句也解除忽略。
 
 ### 4.3 过期响应防护
 
@@ -301,11 +301,11 @@ run.sh → 检查 Node / node_modules / Electron / 锁文件
 
 显式添加 `postinstall` 是实际安装验证中确认的必要处理：当前 Electron 包不通过旧式安装钩子自动准备二进制，而 electron-vite 直接读取安装路径；如果不先安装运行时，会出现 `Electron uninstall`。
 
-`npm run build` 先执行 `tsc --noEmit`，再构建 `out/main`、`out/preload`、`out/renderer`。项目没有 electron-builder、签名、公证或分发脚本。
+`npm run build` 先执行 `tsc --noEmit`，再构建 `out/main`、`out/preload`、`out/renderer`。`pack:mac` 和 `dist:mac` 在构建后调用 electron-builder，分别生成 arm64 `.app`、`.app` 加 DMG，产物写入已被 Git 忽略的 `dist/`。只打包 `out/**/*`、包元数据和生产依赖。采用本机 ad-hoc 签名，不使用 Developer ID、不公证、不发布；细节见 issue1018 文档。`test:package` 启动已生成的实际应用验证本地资源、IPC、沙箱及核心写作交互。
 
 ## 11. 测试与审阅顺序
 
-现有测试包括 100 项 Vitest 与 38 项 Electron E2E。最新执行范围、真实 Ollama 和开发启动链路的历史结果见 [验收记录](VALIDATION.md)。
+现有测试包括 101 项 Vitest 与 39 项 Electron E2E，另有打包应用冒烟脚本。最新执行范围、真实 Ollama 和开发启动链路的历史结果见 [验收记录](VALIDATION.md)。
 
 建议按下面顺序审阅：
 
@@ -326,4 +326,4 @@ run.sh → 检查 Node / node_modules / Electron / 锁文件
 - 单窗口、最近一份草稿；忽略状态、分析缓存、计时器不跨重启保存。
 - 本地文档上限 500,000 字符，全文请求上限 50,000 字符；模型服务可能有更小的上下文窗口。
 - 主题和核心编辑交互已做真实窗口检查；所有输入法候选窗、多显示器和辅助技术组合尚未全面人工验证。
-- 没有账号、云同步、支付、多人协作、官方 TOEFL 评分或应用打包。
+- 没有账号、云同步、支付、多人协作或官方 TOEFL 评分。应用打包已支持 macOS arm64；正式分发签名、公证和自动更新尚未配置。

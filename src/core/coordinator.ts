@@ -114,8 +114,21 @@ export class AnalysisCoordinator {
   }
   ignore(id: string) {
     const e = this.entries.find(e => e.id === id);
-    if (e) { e.ignored = true; if (e.requestId) { void this.api.cancel(e.requestId); e.requestId = undefined; } }
+    if (e) {
+      e.ignored = true;
+      if (e.requestId) { void this.api.cancel(e.requestId); e.requestId = undefined; }
+      e.state = 'pending'; e.result = undefined; e.error = undefined;
+      e.contextSnapshot = undefined; e.reviewedContext = undefined; e.contextChanged = false; e.textChanged = false;
+    }
     this.emit();
+  }
+  reevaluate(id: string) {
+    const entry = this.get(id);
+    if (!entry || !entry.complete || entry.requestId || this.disposed) return;
+    // Only this explicit action restores an ignored sentence; scheduled runs
+    // also use analyze(..., id) and must continue to skip it.
+    entry.ignored = false;
+    this.analyze(undefined, id);
   }
   get(id: string) { return this.entries.find(e => e.id === id); }
   stop() { this.clearTimers(); this.cancelAll(); this.emit(); }

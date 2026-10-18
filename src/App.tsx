@@ -47,11 +47,11 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   const profile = settings.profiles.find(p => p.id === settings.defaultProfileId)!;
   const notify = useCallback((message: string) => setToast(message), []);
   const words = useMemo(() => wordCount(doc.text), [doc.text]);
-  const visible = entries.filter(e => !e.ignored);
-  const goodCount = visible.filter(e => e.result?.status === 'good').length;
-  const revisionCount = visible.filter(e => e.result?.status === 'needs_revision').length;
-  const activeCount = visible.filter(e => e.state === 'analyzing').length;
-  const queuedCount = visible.filter(e => e.state === 'queued').length;
+  const assessed = entries.filter(e => !e.ignored);
+  const goodCount = assessed.filter(e => e.result?.status === 'good').length;
+  const revisionCount = assessed.filter(e => e.result?.status === 'needs_revision').length;
+  const activeCount = assessed.filter(e => e.state === 'analyzing').length;
+  const queuedCount = assessed.filter(e => e.state === 'queued').length;
   const marks = useMemo<ProblemMark[]>(() => entries.filter(e => !e.ignored && !e.textChanged && e.result?.status === 'needs_revision').map(({ from, to, result }) => ({ from, to, severity: result!.issues.some(issue => issue.severity === 'error') ? 'error' : 'improvement' })), [entries]);
 
   useEffect(() => {
@@ -247,8 +247,8 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
           <div className="feedback-summary"><span><i className="summary-dot amber" />{revisionCount} 条建议</span><span><i className="summary-dot green" />{goodCount} 句表达良好</span><button className="text-button" title="只发送选中内容所在的句子与必要上下文" onClick={analyzeSelection}>分析选中内容</button></div>
           <div className="feedback-scroll">
             {full && <FeedbackCard scope="document" entry={full} index={0} onIgnore={() => setFull(null)} onRetry={() => void analyzeFull()} onLocate={() => editor.current?.locate(0, 0)} notify={notify} />}
-            {visible.length ? visible.map((entry, index) => <FeedbackCard key={entry.id} entry={entry} index={index} onAccept={() => accept(entry.id)} onIgnore={() => coordinator.current?.ignore(entry.id)} onRetry={() => { if (!modelStopping) coordinator.current?.analyze(undefined, entry.id); }} onLocate={() => editor.current?.locate(entry.from, entry.to)} notify={notify} />) : <div className="feedback-empty"><div className="empty-illustration"><div className="mini-page"><span /><span /><span /><div><Check size={15} /></div></div><span className="mini-spark">✧</span></div><h3>给思考留出空间。</h3><p>写下第一句英语，<br />中文反馈就会在这里等你。</p><div className="empty-principles"><span><Check size={14} />保留你的原意与语气</span><span><Check size={14} />自然的表达，无需修改</span><span><Check size={14} />是否接受，由你决定</span></div>{profile.kind === 'mock' && <button className="secondary-button" onClick={() => void action('example')}><Plus size={14} />体验示例反馈</button>}</div>}
-            {profile.kind === 'mock' && visible.length > 0 && <p className="demo-footnote">MOCK 演示 · 固定规则，仅展示交互。<br />在设置中连接真实模型，获取实际写作反馈。</p>}
+            {entries.length ? entries.map((entry, index) => <FeedbackCard key={entry.id} entry={entry} index={index} onAccept={() => accept(entry.id)} onIgnore={() => coordinator.current?.ignore(entry.id)} onRetry={() => { if (!modelStopping) coordinator.current?.reevaluate(entry.id); }} onLocate={() => editor.current?.locate(entry.from, entry.to)} notify={notify} />) : <div className="feedback-empty"><div className="empty-illustration"><div className="mini-page"><span /><span /><span /><div><Check size={15} /></div></div><span className="mini-spark">✧</span></div><h3>给思考留出空间。</h3><p>写下第一句英语，<br />中文反馈就会在这里等你。</p><div className="empty-principles"><span><Check size={14} />保留你的原意与语气</span><span><Check size={14} />自然的表达，无需修改</span><span><Check size={14} />是否接受，由你决定</span></div>{profile.kind === 'mock' && <button className="secondary-button" onClick={() => void action('example')}><Plus size={14} />体验示例反馈</button>}</div>}
+            {profile.kind === 'mock' && entries.length > 0 && <p className="demo-footnote">MOCK 演示 · 固定规则，仅展示交互。<br />在设置中连接真实模型，获取实际写作反馈。</p>}
           </div>
           <footer className="feedback-footer"><button className="analyze-button" disabled={Boolean(full?.requestId) || modelStopping} onClick={() => void analyzeFull()}><Sparkles size={16} />分析全文<ArrowRight size={15} /></button><p>主动发送全文 · 关注结构与连贯性</p></footer>
         </aside>
