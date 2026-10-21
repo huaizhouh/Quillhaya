@@ -31,6 +31,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   const [draftState, setDraftState] = useState('草稿已就绪');
   const [fileBusy, setFileBusy] = useState(false);
   const fileBusyRef = useRef(false);
+  const fileVersion = useRef(0);
   const [configVersion, setConfigVersion] = useState(0);
   const [composing, setComposing] = useState(false);
   const revision = useRef(0);
@@ -53,6 +54,35 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   const activeCount = assessed.filter(e => e.state === 'analyzing').length;
   const queuedCount = assessed.filter(e => e.state === 'queued').length;
   const marks = useMemo<ProblemMark[]>(() => entries.filter(e => !e.ignored && !e.textChanged && e.result?.status === 'needs_revision').map(({ from, to, result }) => ({ from, to, severity: result!.issues.some(issue => issue.severity === 'error') ? 'error' : 'improvement' })), [entries]);
+  const detachFile = useCallback((id: string) => {
+    const current = docRef.current;
+    if (current.id !== id || !current.hasFile) return;
+    const next = { ...current, hasFile: false, dirty: true };
+    docRef.current = next; setDoc(next);
+    notify('原文件已移动、删除或原路径已失效，正文仍保留。保存时请重新选择位置。');
+  }, [notify]);
+  const checkFile = useCallback(async () => {
+    const snapshot = docRef.current;
+    const version = fileVersion.current;
+    if (!snapshot.hasFile) return;
+    const reply = await window.desktop.checkFile(snapshot.id);
+    if (reply.ok && !reply.value.hasFile && version === fileVersion.current) detachFile(snapshot.id);
+  }, [detachFile]);
+  useEffect(() => {
+    if (!ready || !doc.hasFile) return;
+    let checking = false, stopped = false;
+    const check = async () => {
+      if (checking || stopped || fileBusyRef.current) return;
+      checking = true;
+      try { await checkFile(); } catch { /* A transient IPC error is not evidence of a moved file. */ }
+      finally { checking = false; }
+    };
+    void check();
+    const interval = setInterval(() => void check(), 2000);
+    const focus = () => { void check(); };
+    window.addEventListener('focus', focus);
+    return () => { stopped = true; clearInterval(interval); window.removeEventListener('focus', focus); };
+  }, [ready, doc.id, doc.hasFile, checkFile]);
 
   useEffect(() => {
     if (!window.desktop) { setBootError('请使用 npm run dev 启动 Electron 桌面应用。'); return; }
@@ -114,9 +144,10 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   const saved = async (saveAs = false) => {
     const snapshot = docRef.current;
     const reply = await window.desktop.save(snapshot, saveAs);
-    if (!reply.ok) { notify(reply.error.message); return false; }
+    if (!reply.ok) { if (reply.error.code === 'file_missing') detachFile(snapshot.id); notify(reply.error.message); return false; }
     if (!reply.value) return false;
     const name = reply.value.name;
+    fileVersion.current++;
     const current = docRef.current;
     if (current.id === snapshot.id) {
       const next = { ...current, name, dirty: current.text !== snapshot.text, hasFile: true };
@@ -129,12 +160,14 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
     notify('Markdown 文档已保存'); return true;
   };
   const canLeave = async () => {
+    await checkFile();
     if (!docRef.current.dirty) return true;
     const reply = await window.desktop.confirmDiscard();
     if (!reply.ok) { notify(reply.error.message); return false; }
     return reply.value === 'save' ? saved() : reply.value === 'discard';
   };
   const reset = (next: WritingDocument) => {
+    fileVersion.current++;
     revision.current = 0; timer.reset(true);
     setComposing(false); setDoc(next); setRestored(false); setTaskOpen(Boolean(next.task));
   };

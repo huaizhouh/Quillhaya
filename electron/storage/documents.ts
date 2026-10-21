@@ -1,5 +1,5 @@
 import { dialog, type BrowserWindow } from 'electron';
-import { readFile, writeFile, rename, stat } from 'node:fs/promises';
+import { readFile, writeFile, rename, stat, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { WritingDocument } from '../../src/models/schema';
 import { AppError } from '../llm/errors';
@@ -10,17 +10,34 @@ export class Documents {
   constructor(private store: LocalStore, private window: () => BrowserWindow) {}
   private fileState(document: WritingDocument): WritingDocument {
     const file = this.files.get(document.id);
-    if (!file) return { ...document, hasFile: false };
+    if (!file) return { ...document, hasFile: false, dirty: document.hasFile ? true : document.dirty };
     const savedText = file.savedText.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
     return { ...document, name: basename(file.path), hasFile: true, dirty: document.text !== savedText };
+  }
+  async checkFile(id: string): Promise<{ hasFile: boolean }> {
+    const file = this.files.get(id);
+    if (!file) return { hasFile: false };
+    let exists: boolean;
+    try { exists = (await stat(file.path)).isFile(); }
+    catch (error) {
+      // Permission or transient I/O failures do not prove the file moved and
+      // must not block local draft recovery/autosave.
+      if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return { hasFile: this.files.has(id) };
+      exists = false;
+    }
+    // A completed Save As may have replaced this association during stat().
+    if (!exists && this.files.get(id) === file) this.files.delete(id);
+    return { hasFile: this.files.has(id) };
   }
   async restore() {
     const draft = await this.store.loadDraft();
     if (!draft) return null;
     if (draft.path) this.files.set(draft.document.id, { path: draft.path, savedText: draft.savedText });
-    return this.fileState(draft.document);
+    await this.checkFile(draft.document.id);
+    return this.fileState({ ...draft.document, hasFile: Boolean(draft.path) });
   }
   async draft(document: WritingDocument) {
+    await this.checkFile(document.id);
     const file = this.files.get(document.id);
     // A late renderer snapshot must not undo a successful save's name/clean
     // state. Derive metadata from the main-process file association and text.
@@ -42,6 +59,8 @@ export class Documents {
   }
   async save(document: WritingDocument, saveAs: boolean) {
     const known = this.files.get(document.id);
+    const missing = () => new AppError('file_missing', '原文件已移动、删除或原路径已失效，正文仍保留。请再次点击保存并选择位置。');
+    if (!saveAs && known && !(await this.checkFile(document.id)).hasFile) throw missing();
     let path = saveAs ? undefined : known?.path;
     if (!path) {
       const result = await dialog.showSaveDialog(this.window(), { title: '保存 Markdown 文档', defaultPath: known?.path ?? document.name, filters: [{ name: 'Markdown', extensions: ['md'] }] });
@@ -56,7 +75,10 @@ export class Documents {
       }
     } else {
       let current: string | null = null;
-      try { current = await readFile(path, 'utf8'); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+      try { current = await readFile(path, 'utf8'); } catch (e) {
+        if (!['ENOENT', 'ENOTDIR'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e;
+        this.files.delete(document.id); throw missing();
+      }
       if (current !== null && current !== known?.savedText) {
         const choice = await dialog.showMessageBox(this.window(), { type: 'warning', message: '文件已被其他应用修改', detail: '覆盖会替换磁盘上的版本。也可以取消后使用“另存为”。', buttons: ['取消', '覆盖保存'], defaultId: 0, cancelId: 0 });
         if (choice.response !== 1) return null;
@@ -66,8 +88,11 @@ export class Documents {
     const temp = join(dirname(path), `.${basename(path)}.${crypto.randomUUID()}.tmp`);
     const lineEnding = known?.savedText.includes('\r\n') ? '\r\n' : '\n';
     const savedText = (known?.savedText.startsWith('\uFEFF') ? '\uFEFF' : '') + document.text.replace(/\r\n?|\n/g, lineEnding);
-    await writeFile(temp, savedText, { encoding: 'utf8', mode: 0o600 });
-    await rename(temp, path);
+    try {
+      await writeFile(temp, savedText, { encoding: 'utf8', mode: 0o600 });
+      if (!saveAs && known && !(await this.checkFile(document.id)).hasFile) throw missing();
+      await rename(temp, path);
+    } finally { await rm(temp, { force: true }).catch(() => {}); }
     this.files.set(document.id, { path, savedText });
     await this.draft({ ...document, name: basename(path), dirty: false });
     return { name: basename(path) };

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, writeFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, readdir, rm, rename, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultSettings, makeProfile, type WritingDocument } from '../../src/models/schema';
@@ -94,10 +94,48 @@ describe('document and settings persistence', () => {
   it('repairs legacy saved metadata and retains genuinely newer draft text with BOM/CRLF files', async () => {
     const doc: WritingDocument = { id: crypto.randomUUID(), name: '未命名.md', text: 'First.\nSecond.', task: '', mode: 'email', dirty: true, hasFile: false };
     const path = join(directory, 'letter.md'), savedText = '\uFEFFFirst.\r\nSecond.';
+    await writeFile(path, savedText);
     await store.saveDraft(doc, path, savedText);
     const documents = new Documents(store, () => ({} as Electron.BrowserWindow));
     expect(await documents.restore()).toMatchObject({ name: 'letter.md', dirty: false, hasFile: true });
     await documents.draft({ ...doc, text: doc.text + '\nNew words.', dirty: false });
     expect((await store.loadDraft())?.document).toMatchObject({ name: 'letter.md', dirty: true, text: doc.text + '\nNew words.' });
+  });
+  it('detaches a moved file, keeps the draft, and requires a new save location', async () => {
+    const path = join(directory, 'essay.md'), moved = join(directory, 'moved.md'), replacement = join(directory, 'new.md');
+    await writeFile(path, 'Original.');
+    electron.dialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [path] });
+    const documents = new Documents(store, () => ({} as Electron.BrowserWindow)); const opened = (await documents.open())!;
+    await rename(path, moved);
+    expect(await documents.checkFile(opened.id)).toEqual({ hasFile: false });
+    await documents.draft(opened);
+    expect(await store.loadDraft()).toMatchObject({ path: null, document: { hasFile: false, dirty: true, text: 'Original.' } });
+    electron.dialog.showSaveDialog.mockResolvedValueOnce({ canceled: true });
+    expect(await documents.save(opened, false)).toBeNull();
+    await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    electron.dialog.showSaveDialog.mockResolvedValueOnce({ canceled: false, filePath: replacement });
+    await documents.save({ ...opened, text: 'Updated.' }, false);
+    expect(await readFile(replacement, 'utf8')).toBe('Updated.'); expect(await readFile(moved, 'utf8')).toBe('Original.');
+    await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('guards Save even before a missing-file check and restores missing legacy files as unsaved', async () => {
+    const path = join(directory, 'essay.md'); await writeFile(path, 'Original.');
+    electron.dialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [path] });
+    const documents = new Documents(store, () => ({} as Electron.BrowserWindow)); const opened = (await documents.open())!;
+    await rm(path);
+    await expect(documents.save({ ...opened, text: 'Unsaved changes.' }, false)).rejects.toMatchObject({ code: 'file_missing' });
+    await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    await store.saveDraft({ ...opened, hasFile: undefined }, path, 'Original.');
+    expect(await new Documents(store, () => ({} as Electron.BrowserWindow)).restore()).toMatchObject({ hasFile: false, dirty: true, text: 'Original.' });
+  });
+  it('handles renamed parent directories and a non-directory replacing the former parent', async () => {
+    const folder = join(directory, 'folder'); await mkdir(folder);
+    const path = join(folder, 'essay.md'); await writeFile(path, 'Original.');
+    electron.dialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [path] });
+    const documents = new Documents(store, () => ({} as Electron.BrowserWindow)); const opened = (await documents.open())!;
+    await rename(folder, join(directory, 'renamed')); await writeFile(folder, 'A file now occupies this path.');
+    expect(await documents.checkFile(opened.id)).toEqual({ hasFile: false });
+    await documents.draft(opened);
+    expect((await store.loadDraft())?.document).toMatchObject({ hasFile: false, dirty: true });
   });
 });

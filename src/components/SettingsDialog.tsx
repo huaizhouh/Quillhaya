@@ -9,6 +9,7 @@ export function SettingsDialog({ settings, keyStatus, onClose, onSaved, onStopMo
   // Read saved settings only on mount. New, unsaved profile IDs exist in draft alone.
   const [headerText, setHeaderText] = useState(() => JSON.stringify(settings.profiles.find(p => p.id === settings.defaultProfileId)!.headers, null, 2));
   const [message, setMessage] = useState('');
+  const [detailsId, setDetailsId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const testId = useRef<string | null>(null);
@@ -19,7 +20,7 @@ export function SettingsDialog({ settings, keyStatus, onClose, onSaved, onStopMo
   const cancelTest = () => { if (testId.current) { void window.desktop.cancel(testId.current); setMessage('正在取消测试并清理模型…'); } };
   const close = () => { if (testId.current) { closeAfterTest.current = true; cancelTest(); } else if (!busy) onClose(); };
   const patch = (value: Partial<ModelProfile>) => setDraft(d => ({ ...d, profiles: d.profiles.map(p => p.id === selected ? { ...p, ...value } : p) }));
-  const select = (p: ModelProfile) => { setSelected(p.id); setHeaderText(JSON.stringify(p.headers, null, 2)); setMessage(''); };
+  const select = (p: ModelProfile) => { setSelected(p.id); setHeaderText(JSON.stringify(p.headers, null, 2)); setMessage(''); setDetailsId(undefined); };
   const withHeaders = () => {
     try {
       const next = { ...draft, profiles: draft.profiles.map(p => p.id === selected ? { ...p, headers: JSON.parse(headerText) } : p) };
@@ -36,20 +37,28 @@ export function SettingsDialog({ settings, keyStatus, onClose, onSaved, onStopMo
     } catch { setMessage('附加 Headers 必须是合法的 JSON 对象。'); return null; }
   };
   const save = async () => {
+    setDetailsId(undefined);
     const next = withHeaders(); if (!next) return;
     setBusy(true);
     try { const reply = await window.desktop.saveSettings(next, keys); if (reply.ok) { setKeys({}); onSaved(reply.value.settings, reply.value.keyStatus, reply.value.analysisChanged); onClose(); } else setMessage(reply.error.message); }
     catch { setMessage('设置保存失败，请重试。'); } finally { setBusy(false); }
   };
   const test = async () => {
+    setDetailsId(undefined);
     const target = selectedProfile(); if (!target) return;
     const id = crypto.randomUUID(); testId.current = id;
     setBusy(true); setTesting(true); setMessage(`仅测试 ${target.name} / ${target.model}，暂不运行写作分析…`);
-    try { const reply = await window.desktop.testConnection(target, keys[selected] ?? undefined, id); setMessage(`${target.name} / ${target.model}：${reply.ok ? reply.value : reply.error.message}`); }
+    try { const reply = await window.desktop.testConnection(target, keys[selected] ?? undefined, id); setMessage(`${target.name} / ${target.model}：${reply.ok ? reply.value : reply.error.message}`); setDetailsId(reply.ok ? undefined : reply.error.detailsId); }
     catch { setMessage('连接测试失败，请检查配置。'); }
     finally { testId.current = null; setBusy(false); setTesting(false); if (closeAfterTest.current) onClose(); }
   };
+  const showDetails = async () => {
+    if (!detailsId) return;
+    try { const reply = await window.desktop.showConnectionDetails(detailsId); if (!reply.ok) setMessage(reply.error.message); }
+    catch { setMessage('无法打开测试详情，请重试。'); }
+  };
   const stop = async () => {
+    setDetailsId(undefined);
     const target = selectedProfile(); if (!target) return;
     setBusy(true); setMessage('正在停止请求并释放 Ollama 模型…');
     try { setMessage(await onStopModels(target, keys[selected] ?? undefined)); }
@@ -87,6 +96,6 @@ export function SettingsDialog({ settings, keyStatus, onClose, onSaved, onStopMo
         <p className="privacy-note"><CheckCircle2 size={15} />文本只发送到你选定的服务。云端服务接收待分析句子和必要上下文；本地端点的数据处理由本地服务决定。“分析全文”会主动发送全文。密钥仅作为该端点的认证凭据使用，通过系统安全存储加密保存，不写入日志。</p>
       </fieldset>
     </div>
-    <footer className="settings-footer"><p role="status">{message}</p><div className="settings-footer-actions"><button className="text-button" disabled={busy} onClick={() => void stop()}><Power size={14} />停止并释放模型</button>{testing ? <button className="secondary-button" onClick={cancelTest}>取消测试</button> : <button className="secondary-button" disabled={busy} onClick={() => void test()}>测试连接</button>}<button className="primary-button" disabled={busy} onClick={() => void save()}>{busy ? '处理中…' : '保存设置'}</button></div></footer>
+    <footer className="settings-footer"><p role="status">{message}{detailsId && <button className="text-button test-details-button" disabled={busy} onClick={() => void showDetails()}>查看详情</button>}</p><div className="settings-footer-actions"><button className="text-button" disabled={busy} onClick={() => void stop()}><Power size={14} />停止并释放模型</button>{testing ? <button className="secondary-button" onClick={cancelTest}>取消测试</button> : <button className="secondary-button" disabled={busy} onClick={() => void test()}>测试连接</button>}<button className="primary-button" disabled={busy} onClick={() => void save()}>{busy ? '处理中…' : '保存设置'}</button></div></footer>
   </dialog>;
 }

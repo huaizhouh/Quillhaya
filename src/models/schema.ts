@@ -40,7 +40,7 @@ export const RequestSchema = z.object({
   profile_id: z.string().max(100)
 }).strict().refine(r => r.to - r.from === r.original_text.length, '本地文本范围不匹配');
 export type AnalysisRequest = z.infer<typeof RequestSchema>;
-export type Failure = { code: string; message: string; retryable: boolean };
+export type Failure = { code: string; message: string; retryable: boolean; detailsId?: string };
 export type Reply<T> = { ok: true; value: T } | { ok: false; error: Failure };
 
 export const ProviderKindSchema = z.enum(['mock', 'openai', 'openrouter', 'ollama', 'lmstudio', 'vllm', 'llamacpp', 'custom']);
@@ -97,11 +97,13 @@ export interface DesktopAPI {
   bootstrap(): Promise<Reply<Bootstrap>>;
   saveSettings(settings: Settings, keys: Record<string, string | null>): Promise<Reply<{ settings: Settings; keyStatus: Record<string, boolean>; analysisChanged: boolean }>>;
   testConnection(profile: ModelProfile, key?: string, requestId?: string): Promise<Reply<string>>;
+  showConnectionDetails(id: string): Promise<Reply<void>>;
   stopModels(profile?: ModelProfile, key?: string): Promise<Reply<StopModelsResult>>;
   analyze(request: AnalysisRequest): Promise<Reply<AnalysisResult>>;
   cancel(requestId: string): Promise<void>;
   draft(document: WritingDocument): Promise<Reply<void>>;
   open(): Promise<Reply<WritingDocument | null>>;
+  checkFile(id: string): Promise<Reply<{ hasFile: boolean }>>;
   save(document: WritingDocument, saveAs: boolean): Promise<Reply<{ name: string } | null>>;
   confirmDiscard(): Promise<Reply<'save' | 'discard' | 'cancel'>>;
   close(document: WritingDocument): Promise<Reply<void>>;

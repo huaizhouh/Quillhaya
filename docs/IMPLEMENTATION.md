@@ -2,7 +2,7 @@
 
 这份文档描述当前源码中**已经实现**的功能与方法，用于对照代码审阅。运行方式见 [README](../README.md)，实际测试记录见 [VALIDATION](VALIDATION.md)。
 
-最新忽略行为修复与打包升级见 [issue1018 实现说明](ISSUE1018-IMPLEMENTATION.md)。此前见 [issue1014 实现说明](ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](ISSUE1012-IMPLEMENTATION.md)，初次四项修复保留在 [历史修复说明](FIXES-2026-10-12.md)。沿用原有运行时技术栈；新增 electron-builder 开发依赖用于打包。
+最新连接测试详情及外部移动文件处理见 [issue1020 实现说明](ISSUE1020-IMPLEMENTATION.md)，本轮未增加依赖。此前见 [issue1018 实现说明](ISSUE1018-IMPLEMENTATION.md)、[issue1014 实现说明](ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](ISSUE1012-IMPLEMENTATION.md)，初次四项修复保留在 [历史修复说明](FIXES-2026-10-12.md)。
 
 ## 1. 技术栈和选型
 
@@ -193,7 +193,9 @@ Email Writing 模式额外识别短称呼行，如 `Dear Alex,`、`Hi Alex,`、`
 5. 429、选定的 5xx、网络连接失败最多两次指数退避，基础等待 600 ms，参考 `Retry-After` 并将等待上限限制为 5 秒。
 6. `grammar/spelling` 必须标为 `error`，冲突进入同一次有限 JSON 修复；有效 issues 按客观错误优先稳定排序。单句 `needs_revision` 含任何 improvement 时，最多追加一次独立复核：重新构造系统提示词、原文和相同上下文，附上待核验的原文片段，不带第一轮 assistant 结论，降低小模型沿用错误分类的倾向。系统提示与复核采用通用分类原则，同时检查准确性和表达质量：允许纯优化结果，混合结果保留有效优化，不为了错误优先而制造错误或机械升级 severity；不加入针对具体词句的拦截规则。复核漏列但已在最终推荐句中采用的首轮 improvement，只在唯一、不重叠的字面替换能够完整重建最终推荐句时补回，仍最多三条；不改推荐句、不增加请求。good、纯客观错误及全文结果不触发此复核。
 7. 每个网络尝试有独立超时；整个 analyze 最多 7 次尝试（初始 + 最多两次格式降级 + 两次瞬态重试 + 一次修复 + 一次语法复核）。因此包含退避/回退/修复/复核时，总耗时可能大于设置中的单次超时时间。
-8. 401/403、404、超时、网络、JSON、文本不匹配分别映射为中文错误；原始服务端错误正文不会直接显示或记录。
+8. 401/403、404、超时、网络、JSON、文本不匹配分别映射为中文错误；日常写作请求不展示或记录原始服务端正文。连接测试失败可通过独立详情窗口查看脱敏的响应，见下文。
+
+连接测试使用独立 `CompatibleProvider` 和 [`ConnectionDiagnostics`](../electron/llm/connection-diagnostics.ts) 包装的 fetch。保留每次请求的 HTTP 元数据、响应正文及底层错误，包括格式降级、修复、瞬态重试和 Ollama 清理；不修改 Provider 的分析、校验或重试规则。失败的 `Reply.error.detailsId` 只标识主进程内存中的最新报告，renderer 可请求 `llm:test-details` 打开它。详情页无 preload、无 Node API、禁止脚本和外部资源、转义全部服务端文本；报告不落盘。下一次连接测试会替换旧报告，单次响应正文显示上限为 1,000,000 字符，超出明确提示。
 
 原生 Anthropic/Gemini 尚未实现。未来添加实现同一接口的类，再在主进程工厂中选择即可，不必更改编辑器或卡片逻辑。
 
@@ -227,6 +229,8 @@ Email Writing 模式额外识别短称呼行，如 `Dear Alex,`、`Hi Alex,`、`
 - 限制文件大小，并用严格 UTF-8 解码拒绝非法字节。
 - 编辑器统一使用 LF，主进程保存时按已打开文件的 CRLF/BOM 风格还原。
 - 保存前比较磁盘文本与此前保存版本，若被其他应用修改，则显示覆盖确认。
+- 每两秒及窗口重新获得焦点时核验当前文件是否仍存在，离开文档前也检查。原路径失效时清除文件关联并标为未保存，保留编辑器与自动草稿；再次保存需重新选择位置，不自动搜索文件的新位置。
+- 保存时独立核验旧路径，临时文件写好后、替换目标前再次核验。不存在时返回 `file_missing` 并移除临时文件，不能绕过检测在旧路径重建文档。草稿恢复也检查关联是否有效；权限或临时 I/O 错误不当作文件移动，也不阻断自动草稿。
 - 临时文件写在目标同目录，成功后 rename，避免直接截断原文件。
 - 保存对话框期间仍可输入；保存的是点击时的快照。若返回后正文已变，保留 dirty 状态并阻止“保存后离开”丢掉新增输入。
 - 新建、打开、关闭和退出都经过未保存确认。
@@ -256,8 +260,9 @@ IPC 来源必须同时满足：属于当前窗口 webContents、来自其主 fra
 | `app:bootstrap` | 非密钥设置、最近文档、密钥是否存在 |
 | `settings:save` | 校验设置和写入式密钥更新 |
 | `llm:analyze` / `llm:cancel` / `llm:test` | 分析、按 UUID 取消、测试单个指定配置 |
+| `llm:test-details` | 按最新报告 ID 打开脱敏的连接测试详情窗口 |
 | `llm:stop` | 取消全部请求并释放已用及指定的 Ollama 模型，返回成功/失败明细 |
-| `document:open` / `save` / `draft` / `confirm` | 文档流程 |
+| `document:open` / `save` / `draft` / `confirm` / `check` | 文档流程与当前文件关联核验 |
 | `app:close` / `app:cancel-close` | 草稿落盘后关闭，或取消退出 |
 | `app:renderer-failed` | 界面异常后保存可选的最新文档快照，启用主进程退出路径 |
 | `llm:progress` | 主进程向 renderer 通知指定请求已排队或已开始执行 |
@@ -305,7 +310,7 @@ run.sh → 检查 Node / node_modules / Electron / 锁文件
 
 ## 11. 测试与审阅顺序
 
-现有测试包括 101 项 Vitest 与 39 项 Electron E2E，另有打包应用冒烟脚本。最新执行范围、真实 Ollama 和开发启动链路的历史结果见 [验收记录](VALIDATION.md)。
+现有测试包括 108 项 Vitest 与 41 项 Electron E2E，另有打包应用冒烟脚本。最新执行范围、真实 Ollama 和开发启动链路的历史结果见 [验收记录](VALIDATION.md)。
 
 建议按下面顺序审阅：
 
@@ -323,7 +328,7 @@ run.sh → 检查 Node / node_modules / Electron / 锁文件
 - Mock 只演示固定规则，不代表英语质量判断；其他完整句子展示 good 只是交互演示。
 - 暂无 Anthropic/Gemini 原生协议、Markdown 渲染预览、自动 `/models` 列表、多文档标签和历史版本库。
 - 分句是保守规则，包含 URL/行内代码的句子可能整体跳过；除邮件称呼开头的合并规则外，跨行未结束句子仍按片段处理。扫描与 React 反馈更新仍有进一步性能优化空间。
-- 单窗口、最近一份草稿；忽略状态、分析缓存、计时器不跨重启保存。
+- 单文档主窗口和独立连接测试详情窗口，最近一份草稿；忽略状态、分析缓存、计时器不跨重启保存。
 - 本地文档上限 500,000 字符，全文请求上限 50,000 字符；模型服务可能有更小的上下文窗口。
 - 主题和核心编辑交互已做真实窗口检查；所有输入法候选窗、多显示器和辅助技术组合尚未全面人工验证。
 - 没有账号、云同步、支付、多人协作或官方 TOEFL 评分。应用打包已支持 macOS arm64；正式分发签名、公证和自动更新尚未配置。

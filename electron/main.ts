@@ -10,6 +10,7 @@ import { CompatibleProvider, MockProvider, type LLMProvider } from './llm/provid
 import { RequestQueue, serialKey } from './llm/queue';
 import { ModelRuntime } from './llm/runtime';
 import { AppError, failure } from './llm/errors';
+import { ConnectionDiagnostics, diagnosticHTML, type ConnectionReport } from './llm/connection-diagnostics';
 
 const here = dirname(fileURLToPath(import.meta.url));
 app.setName('TOEFL Writing Assistant');
@@ -17,6 +18,8 @@ app.setName('TOEFL Writing Assistant');
 // Automated tests always override it with an isolated temporary directory.
 app.setPath('userData', process.env.TWA_TEST_USER_DATA || join(app.getPath('appData'), 'TOEFL Writing Assistant'));
 let window: BrowserWindow | null = null;
+let detailsWindow: BrowserWindow | null = null;
+let connectionReport: ConnectionReport | undefined;
 let allowClose = false;
 let quitRequested = false;
 let rendererFailed = false;
@@ -137,11 +140,32 @@ function registerIPC() {
     }, serialKey(profile));
   });
   handle('llm:cancel', data => { queue.cancel(z.string().uuid().parse(data)); });
-  handle('llm:test', data => {
+  handle('llm:test', async data => {
     if (closing) throw new AppError('closing', '正在关闭应用并释放模型。');
     const { profile, key, requestId } = z.object({ profile: ProfileSchema, key: z.string().max(8000).regex(/^[^\r\n]*$/).optional(), requestId: z.string().uuid().optional() }).strict().parse(data);
-    const p = provider(profile, key || undefined);
-    return runtime.test(requestId ?? crypto.randomUUID(), profile, signal => p.testConnection(signal), profile.kind === 'ollama' ? () => p.release!() : undefined);
+    connectionReport = undefined;
+    const resolvedKey = key || store.key(profile);
+    const diagnostics = new ConnectionDiagnostics(profile, resolvedKey);
+    const p: LLMProvider = profile.kind === 'mock' ? new MockProvider(profile.mockBehavior) : new CompatibleProvider(profile, resolvedKey, diagnostics.fetcher());
+    try { return await runtime.test(requestId ?? crypto.randomUUID(), profile, signal => p.testConnection(signal), profile.kind === 'ollama' ? () => p.release!() : undefined); }
+    catch (error) {
+      const problem = failure(error);
+      connectionReport = diagnostics.finish(problem);
+      throw new AppError(problem.code, problem.message, problem.retryable, connectionReport.id);
+    }
+  });
+  handle('llm:test-details', async data => {
+    const id = z.string().uuid().parse(data);
+    if (!connectionReport || connectionReport.id !== id) throw new AppError('details_expired', '测试详情已过期，请重新测试连接。');
+    detailsWindow?.destroy();
+    const detail = new BrowserWindow({ width: 1000, height: 760, minWidth: 640, minHeight: 450, parent: window!, title: '连接测试详情', show: false,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
+    detailsWindow = detail;
+    detail.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    detail.webContents.on('will-navigate', event => event.preventDefault());
+    detail.on('closed', () => { if (detailsWindow === detail) detailsWindow = null; });
+    await detail.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(diagnosticHTML(connectionReport))}`);
+    detail.show();
   });
   handle('llm:stop', data => {
     const input = z.object({ profile: ProfileSchema.optional(), key: z.string().max(8000).regex(/^[^\r\n]*$/).optional() }).strict().parse(data);
@@ -151,6 +175,7 @@ function registerIPC() {
   });
   handle('document:draft', data => documents.draft(DocumentSchema.parse(data)));
   handle('document:open', () => documents.open());
+  handle('document:check', data => documents.checkFile(z.string().uuid().parse(data)));
   handle('document:save', data => {
     const { document, saveAs } = z.object({ document: DocumentSchema, saveAs: z.boolean() }).strict().parse(data);
     return documents.save(document, saveAs);
@@ -184,7 +209,7 @@ async function createWindow() {
   window.webContents.on('will-attach-webview', event => event.preventDefault());
   window.webContents.on('render-process-gone', () => { rendererFailed = true; queue.clear(); });
   window.on('close', event => { if (!allowClose) { event.preventDefault(); requestClose(); } });
-  window.on('closed', () => { window = null; queue.clear(); providers.clear(); });
+  window.on('closed', () => { detailsWindow?.destroy(); connectionReport = undefined; window = null; queue.clear(); providers.clear(); });
   window.once('ready-to-show', () => window?.show());
   await window.loadURL(trustedUrl);
 }
