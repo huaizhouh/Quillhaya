@@ -7,5 +7,5 @@ export async function writeEditor(page: Page, text: string) {
   await editor.focus();
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
   await page.keyboard.insertText(text);
-  await expect(editor).toHaveText(text);
+  await expect(editor).toHaveText(text, { useInnerText: true });
 }

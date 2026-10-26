@@ -2,7 +2,7 @@
 
 这份文档描述当前源码中**已经实现**的功能与方法，用于对照代码审阅。运行方式见 [README](../README.md)，实际测试记录见 [VALIDATION](VALIDATION.md)。
 
-最新连接测试详情及外部移动文件处理见 [issue1020 实现说明](ISSUE1020-IMPLEMENTATION.md)，本轮未增加依赖。此前见 [issue1018 实现说明](ISSUE1018-IMPLEMENTATION.md)、[issue1014 实现说明](ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](ISSUE1012-IMPLEMENTATION.md)，初次四项修复保留在 [历史修复说明](FIXES-2026-10-12.md)。
+最新原生右键菜单、正文到反馈定位及每模型额外系统提示词见 [issue1022 实现说明](ISSUE1022-IMPLEMENTATION.md)。连接测试详情及外部移动文件处理见 [issue1020 实现说明](ISSUE1020-IMPLEMENTATION.md)，本轮未增加依赖。此前见 [issue1018 实现说明](ISSUE1018-IMPLEMENTATION.md)、[issue1014 实现说明](ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](ISSUE1012-IMPLEMENTATION.md)，初次四项修复保留在 [历史修复说明](FIXES-2026-10-12.md)。
 
 ## 1. 技术栈和选型
 

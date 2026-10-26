@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, writeFile, readdir, rm, rename, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultSettings, makeProfile, type WritingDocument } from '../../src/models/schema';
+import { defaultSettings, makeProfile, ProfileSchema, type WritingDocument } from '../../src/models/schema';
 
 const electron = vi.hoisted(() => ({
   safeStorage: { isEncryptionAvailable: vi.fn(() => true), getSelectedStorageBackend: vi.fn(() => 'keychain'), encryptString: vi.fn((text: string) => Buffer.from(Buffer.from(text).map(b => b ^ 42))), decryptString: vi.fn((value: Buffer) => Buffer.from(Buffer.from(value).map(b => b ^ 42)).toString('utf8')) },
@@ -70,6 +70,18 @@ describe('document and settings persistence', () => {
     await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...legacy, debounceMs: 1900 }));
     const restarted = new LocalStore(directory); await restarted.init();
     expect(restarted.settings.debounceMs).toBe(1900); expect(restarted.settings.revisionDebounceMs).toBe(3000); expect(restarted.notice).toBeUndefined();
+  });
+  it('migrates missing per-model prompts and persists independent prompts without losing existing settings', async () => {
+    const { extraSystemPrompt: _unused, ...legacy } = makeProfile('ollama', 'local');
+    await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings, defaultProfileId: 'local', profiles: [legacy] }));
+    const restarted = new LocalStore(directory); await restarted.init();
+    expect(restarted.notice).toBeUndefined(); expect(restarted.settings.profiles[0]).toEqual({ ...legacy, extraSystemPrompt: '' });
+    const local = { ...restarted.settings.profiles[0], extraSystemPrompt: '采用英式英语。\n保持礼貌。' };
+    const remote = { ...makeProfile('custom'), extraSystemPrompt: '中文解释简洁。' };
+    await restarted.saveSettings({ ...restarted.settings, profiles: [local, remote] }, {});
+    const again = new LocalStore(directory); await again.init(); expect(again.settings.profiles).toEqual([local, remote]);
+    expect(ProfileSchema.safeParse({ ...local, extraSystemPrompt: 'x'.repeat(6001) }).success).toBe(false);
+    expect(ProfileSchema.safeParse({ ...local, extraSystemPrompt: 123 }).success).toBe(false);
   });
   it('derives saved-to-file status from the actual file association, including legacy drafts', async () => {
     const doc: WritingDocument = { id: crypto.randomUUID(), name: '未命名.md', text: '', task: '', mode: 'email', dirty: false };

@@ -23,6 +23,7 @@ const problems = StateField.define<DecorationSet>({
 
 export interface EditorHandle {
   selection(): { from: number; to: number };
+  contextRange(point: { x: number; y: number }): { from: number; to: number } | undefined;
   apply(from: number, to: number, original: string, replacement: string): boolean;
   locate(from: number, to: number): void;
   focus(): void;
@@ -35,6 +36,19 @@ export const WritingEditor = forwardRef<EditorHandle, Props>(function WritingEdi
   const marks = useRef(props.marks); marks.current = props.marks;
   useImperativeHandle(ref, () => ({
     selection: () => { const s = view.current?.state.selection.main; return { from: s?.from ?? 0, to: s?.to ?? 0 }; },
+    contextRange: point => {
+      const v = view.current, target = document.elementFromPoint(point.x, point.y);
+      if (!v || !target || !v.contentDOM.contains(target)) return;
+      const position = v.posAtCoords(point);
+      if (position === null) return;
+      const selection = v.state.selection.main;
+      if (selection.empty || position < selection.from || position > selection.to) return { from: position, to: position };
+      // Allow surrounding whitespace, while never combining distinct review units.
+      const text = v.state.sliceDoc(selection.from, selection.to);
+      const from = selection.from + text.length - text.trimStart().length;
+      const to = selection.to - (text.length - text.trimEnd().length);
+      return from < to ? { from, to } : undefined;
+    },
     apply: (from, to, original, replacement) => {
       const v = view.current;
       if (!v || v.composing) return false;

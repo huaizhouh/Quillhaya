@@ -36,6 +36,21 @@ describe('OpenAI-compatible provider', () => {
   afterEach(() => vi.useRealTimers());
   const r = request(); const signal = () => new AbortController().signal;
   const response = () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(good(r)) } }] }));
+  it('applies model-specific prompts to connection tests and document requests, and clearing restores the built-in prompt', async () => {
+    const fetcher = vi.fn(async (_url: unknown, options: RequestInit | undefined) => {
+      const input = JSON.parse(JSON.parse(String(options?.body)).messages[1].content);
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(good(input)) } }] }));
+    });
+    const a = new CompatibleProvider({ ...testProfile, extraSystemPrompt: '采用英式英语。\n解释简洁。' }, undefined, fetcher);
+    await a.testConnection(signal()); await a.analyze({ ...r, scope: 'document' }, signal());
+    await new CompatibleProvider({ ...testProfile, extraSystemPrompt: '使用美式英语。' }, undefined, fetcher).analyze(r, signal());
+    await new CompatibleProvider({ ...testProfile, extraSystemPrompt: '' }, undefined, fetcher).analyze(r, signal());
+    const prompts = fetcher.mock.calls.map(call => JSON.parse(String(call[1]?.body)).messages[0].content);
+    expect(prompts[0]).toContain('采用英式英语。\n解释简洁。');
+    expect(prompts[1]).toContain('采用英式英语。'); expect(prompts[1]).toContain('篇章分析');
+    expect(prompts[2]).toContain('使用美式英语。'); expect(prompts[2]).not.toContain('采用英式英语。');
+    expect(prompts[3]).toBe(systemPrompt(r)); expect(systemPrompt(r, '  \n')).toBe(systemPrompt(r));
+  });
   it('sends only necessary text and context, authenticates without serializing metadata', async () => {
     const fetcher = vi.fn().mockResolvedValue(response());
     const p = new CompatibleProvider({ ...testProfile, auth: 'bearer' }, 'unit-test-placeholder', fetcher);
@@ -46,19 +61,21 @@ describe('OpenAI-compatible provider', () => {
   });
   it('falls back from schema to JSON to text and remembers endpoint compatibility', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(new Response('response_format not supported', { status: 400 })).mockResolvedValueOnce(new Response('json_object not supported', { status: 422 })).mockImplementation(async () => response());
-    const provider = new CompatibleProvider(testProfile, undefined, fetcher);
+    const provider = new CompatibleProvider({ ...testProfile, extraSystemPrompt: '采用英式英语。' }, undefined, fetcher);
     await provider.analyze(r, signal()); await provider.analyze(r, signal());
     expect(fetcher).toHaveBeenCalledTimes(4);
     expect(JSON.parse(fetcher.mock.calls[0][1].body).response_format).toMatchObject({ type: 'json_schema', json_schema: { strict: true, schema: { additionalProperties: false } } });
     expect(JSON.parse(fetcher.mock.calls[1][1].body).response_format).toEqual({ type: 'json_object' });
     expect(JSON.parse(fetcher.mock.calls[2][1].body)).not.toHaveProperty('response_format');
     expect(JSON.parse(fetcher.mock.calls[3][1].body)).not.toHaveProperty('response_format');
+    for (const call of fetcher.mock.calls) expect(JSON.parse(call[1].body).messages[0].content).toContain('采用英式英语。');
   });
   it.each([{ confidence: '0.8' }, { overall_explanation_zh: 'Looks good.' }, { issues: null }])('repairs invalid fields using the actual error and previous response: %s', async patch => {
     const invalid = JSON.stringify({ ...good(r), ...patch });
     const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: invalid } }] }))).mockResolvedValueOnce(response());
-    expect((await new CompatibleProvider(testProfile, undefined, fetcher).analyze(r, signal())).status).toBe('good');
+    expect((await new CompatibleProvider({ ...testProfile, extraSystemPrompt: '采用英式英语。' }, undefined, fetcher).analyze(r, signal())).status).toBe('good');
     const messages = JSON.parse(fetcher.mock.calls[1][1].body).messages;
+    expect(messages[0].content).toContain('采用英式英语。');
     expect(messages[2]).toEqual({ role: 'assistant', content: invalid });
     expect(messages[3].content).toContain(Object.keys(patch)[0]); expect(messages[3].content).toContain('必须使用中文');
   });
@@ -112,9 +129,10 @@ describe('OpenAI-compatible provider', () => {
     const corrected = { ...optional, suggested_revision: 'It truly troubles my experience.', issues: [{ type: 'grammar', severity: 'error', original_span: 'trouble', suggested_text: 'troubles', explanation_zh: 'it 是单数主语，谓语应为 troubles。' }] };
     const response = (value: unknown) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(value) } }] }));
     const fetcher = vi.fn().mockResolvedValueOnce(response(optional)).mockResolvedValueOnce(response(corrected));
-    const result = await new CompatibleProvider(testProfile, undefined, fetcher).analyze(input, signal());
+    const result = await new CompatibleProvider({ ...testProfile, extraSystemPrompt: '采用英式英语。' }, undefined, fetcher).analyze(input, signal());
     expect(result.issues[0]).toMatchObject({ type: 'grammar', severity: 'error', original_span: 'trouble' }); expect(fetcher).toHaveBeenCalledTimes(2);
     const messages = JSON.parse(fetcher.mock.calls[1][1].body).messages;
+    expect(messages[0].content).toContain('采用英式英语。');
     expect(JSON.parse(messages[1].content).context).toEqual(input.context); expect(messages.at(-1).content).toContain('每个谓语');
     expect(messages.some((message: { role: string }) => message.role === 'assistant')).toBe(false);
   });

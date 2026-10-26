@@ -1,6 +1,16 @@
 export type Sentence = { id: string; text: string; from: number; to: number; complete: boolean };
 type Span = { from: number; to: number };
 
+/** A caret or selection must belong entirely to one existing feedback unit. */
+export function singleSentenceAtRange<T extends Span>(sentences: T[], range: Span): T | undefined {
+  if (range.from > range.to || range.from < 0) return;
+  if (range.from === range.to) {
+    return sentences.find(s => s.from <= range.from && range.from < s.to)
+      ?? sentences.find(s => s.to === range.from);
+  }
+  return sentences.find(s => s.from <= range.from && range.to <= s.to);
+}
+
 /** Build exclusions against the original UTF-16 string, never normalized offsets. */
 export function markdownExclusions(text: string): Span[] {
   const spans: Span[] = [];

@@ -59,9 +59,13 @@ Learning takes practice.
 
 支持 Academic Discussion、Email Writing、General English 三种模式。题目/教授提问/邮件情境在独立区域输入，不计入作文字数，可拖动底部横向手柄调整高度。计时器从本次会话首次输入开始；右侧支持暂停、继续和复位，复位后保持暂停，供自行控制练习时间。
 
+正文或设置输入框中右键可使用查询（Look Up）、剪切、复制、粘贴、粘贴并匹配样式和全选。正文右键位置或选区仅属于一句时，还可“定位到写作反馈”，自动展开侧栏并突出对应卡片；选区跨句时不显示此项。
+
 ## 模型配置
 
 打开右上角设置或按 `⌘,`，点击“添加模型”，选择 Provider，填写实际 Base URL 和模型 ID，选择认证方式，然后测试连接并保存。勾选“设为当前及默认模型”，或在反馈栏下拉框切换已保存配置。
+
+每个真实模型配置可填写“额外系统提示词”（最多 6000 字符），用于补充英语习惯、语气或解释偏好。提示词追加到内置审议要求后，同时用于连接测试、单句和全文分析；保留中文说明和反馈格式。各配置独立保存，清空后恢复默认；Mock 固定规则不使用此设置。
 
 连接测试失败时，状态文字旁出现“查看详情”。点击会打开独立窗口，展示本次各次请求的时间、地址、输出格式、HTTP 状态、Headers、响应正文和底层连接错误；可查看空 content、finish_reason、服务端错误等具体信息。认证凭据会隐藏，响应只保留在运行内存中；超长正文超过 1,000,000 字符时会明确标注截断。此功能只记录固定测试句的连接测试，不记录日常作文请求。
 
@@ -217,7 +221,7 @@ E2E 使用下载的 Electron 自身，不需要另外下载 Playwright Chromium�
 
 可选执行 `npm run test:ollama:balance`，检查 issue1014 的语法误报、可选优化保留及混合建议，沿用同样的本机配置与测试模型释放规则。
 
-最新连接测试详情与文件移动处理见 [issue1020 实现说明](docs/ISSUE1020-IMPLEMENTATION.md)；此前见 [issue1018 实现说明](docs/ISSUE1018-IMPLEMENTATION.md)、 [issue1014 实现说明](docs/ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](docs/ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](docs/ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](docs/ISSUE1012-IMPLEMENTATION.md) 和 [历史修复说明](docs/FIXES-2026-10-12.md)。
+最新右键菜单、反馈定位及每模型系统提示词见 [issue1022 实现说明](docs/ISSUE1022-IMPLEMENTATION.md)；连接测试详情与文件移动处理见 [issue1020 实现说明](docs/ISSUE1020-IMPLEMENTATION.md)；此前见 [issue1018 实现说明](docs/ISSUE1018-IMPLEMENTATION.md)、 [issue1014 实现说明](docs/ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](docs/ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](docs/ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](docs/ISSUE1012-IMPLEMENTATION.md) 和 [历史修复说明](docs/FIXES-2026-10-12.md)。
 
 ## 故障排查
 

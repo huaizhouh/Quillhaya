@@ -11,6 +11,7 @@ import { RequestQueue, serialKey } from './llm/queue';
 import { ModelRuntime } from './llm/runtime';
 import { AppError, failure } from './llm/errors';
 import { ConnectionDiagnostics, diagnosticHTML, type ConnectionReport } from './llm/connection-diagnostics';
+import { installContextMenu } from './context-menu';
 
 const here = dirname(fileURLToPath(import.meta.url));
 app.setName('TOEFL Writing Assistant');
@@ -19,6 +20,7 @@ app.setName('TOEFL Writing Assistant');
 app.setPath('userData', process.env.TWA_TEST_USER_DATA || join(app.getPath('appData'), 'TOEFL Writing Assistant'));
 let window: BrowserWindow | null = null;
 let detailsWindow: BrowserWindow | null = null;
+let contextMenu: ReturnType<typeof installContextMenu> | undefined;
 let connectionReport: ConnectionReport | undefined;
 let allowClose = false;
 let quitRequested = false;
@@ -108,6 +110,10 @@ function createMenu() {
 }
 
 function registerIPC() {
+  handle('context-menu:show', data => {
+    const { id, sentenceId } = z.object({ id: z.string().uuid(), sentenceId: z.string().min(1).max(100).optional() }).strict().parse(data);
+    contextMenu?.show(id, sentenceId);
+  });
   handle('app:bootstrap', async () => {
     rendererFailed = false;
     const document = await documents.restore();
@@ -161,6 +167,7 @@ function registerIPC() {
     const detail = new BrowserWindow({ width: 1000, height: 760, minWidth: 640, minHeight: 450, parent: window!, title: '连接测试详情', show: false,
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
     detailsWindow = detail;
+    installContextMenu(detail);
     detail.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     detail.webContents.on('will-navigate', event => event.preventDefault());
     detail.on('closed', () => { if (detailsWindow === detail) detailsWindow = null; });
@@ -205,11 +212,13 @@ async function createWindow() {
     webPreferences: { preload: join(here, '../preload/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false }
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const owner = window;
+  contextMenu = installContextMenu(owner, request => owner.webContents.send('context-menu:request', request));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.on('will-attach-webview', event => event.preventDefault());
   window.webContents.on('render-process-gone', () => { rendererFailed = true; queue.clear(); });
   window.on('close', event => { if (!allowClose) { event.preventDefault(); requestClose(); } });
-  window.on('closed', () => { detailsWindow?.destroy(); connectionReport = undefined; window = null; queue.clear(); providers.clear(); });
+  window.on('closed', () => { detailsWindow?.destroy(); connectionReport = undefined; contextMenu = undefined; window = null; queue.clear(); providers.clear(); });
   window.once('ready-to-show', () => window?.show());
   await window.loadURL(trustedUrl);
 }

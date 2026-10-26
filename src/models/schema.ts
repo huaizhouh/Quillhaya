@@ -57,6 +57,7 @@ export const ProfileSchema = z.object({
   headers: z.record(z.string().max(2000)).refine(h => Object.keys(h).length <= 10 && Object.entries(h).every(([k, v]) =>
     /^[A-Za-z0-9-]+$/.test(k) && !/authorization|cookie|key|token|secret|host|content-length|connection|proxy/i.test(k) && !/[\r\n]/.test(v)), '附加 headers 不得包含认证凭据或传输控制字段'),
   temperature: z.number().min(0).max(2).nullable(), timeoutMs: z.number().int().min(1000).max(120_000),
+  extraSystemPrompt: z.string().max(6000).default(''),
   mockBehavior: z.enum(['normal', 'error', 'slow'])
 }).strict();
 export type ModelProfile = z.infer<typeof ProfileSchema>;
@@ -74,6 +75,7 @@ export const DocumentSchema = z.object({
 export type WritingDocument = z.infer<typeof DocumentSchema>;
 export type MenuCommand = 'new' | 'open' | 'save' | 'saveAs' | 'settings' | 'close';
 export type AnalysisProgress = { requestId: string; phase: 'queued' | 'running' };
+export type ContextMenuRequest = { id: string; x: number; y: number };
 export type StopModelsResult = { released: string[]; alreadyReleased: string[]; failed: { model: string; message: string }[] };
 export type Bootstrap = { settings: Settings; document: WritingDocument | null; restored: boolean; keyStatus: Record<string, boolean>; storageNotice?: string };
 
@@ -89,7 +91,7 @@ export const presetInfo: Record<ModelProfile['kind'], { name: string; url: strin
 };
 export function makeProfile(kind: ModelProfile['kind'], id = kind as string): ModelProfile {
   const p = presetInfo[kind];
-  return { id, kind, name: p.name, baseUrl: p.url, model: p.model, auth: p.auth, envKey: p.envKey, authHeader: 'x-api-key', headers: {}, temperature: null, timeoutMs: 30_000, mockBehavior: 'normal' };
+  return { id, kind, name: p.name, baseUrl: p.url, model: p.model, auth: p.auth, envKey: p.envKey, authHeader: 'x-api-key', headers: {}, temperature: null, timeoutMs: 30_000, extraSystemPrompt: '', mockBehavior: 'normal' };
 }
 export const defaultSettings: Settings = { theme: 'system', fontSize: 18, debounceMs: 1200, revisionDebounceMs: 3000, autoAnalyze: true, defaultProfileId: 'mock', profiles: [makeProfile('mock')] };
 
@@ -110,6 +112,9 @@ export interface DesktopAPI {
   cancelClose(): Promise<Reply<void>>;
   rendererFailed(document?: WritingDocument): Promise<Reply<void>>;
   copy(text: string): Promise<Reply<void>>;
+  showContextMenu(id: string, sentenceId?: string): Promise<Reply<void>>;
+  onContextMenu(callback: (request: ContextMenuRequest) => void): () => void;
+  onLocateFeedback(callback: (sentenceId: string) => void): () => void;
   onMenu(callback: (command: MenuCommand) => void): () => void;
   onAnalysisProgress(callback: (progress: AnalysisProgress) => void): () => void;
 }

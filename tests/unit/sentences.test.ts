@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { checkedReplacement, splitSentences, wordCount } from '../../src/core/sentences';
+import { checkedReplacement, singleSentenceAtRange, splitSentences, wordCount } from '../../src/core/sentences';
+
+describe('context menu feedback target', () => {
+  const text = '# Heading.\n\nDr. Smith teaches.  We learn.\nStill writing';
+  const sentences = splitSentences(text);
+  it('finds a single sentence, its end caret and incomplete prose with original offsets', () => {
+    const first = sentences[0];
+    expect(singleSentenceAtRange(sentences, { from: first.from + 5, to: first.from + 10 })).toBe(first);
+    expect(singleSentenceAtRange(sentences, { from: first.to, to: first.to })).toBe(first);
+    expect(singleSentenceAtRange(sentences, { from: text.length, to: text.length })).toBe(sentences[2]);
+  });
+  it('omits cross-sentence, excluded Markdown and whitespace-only positions', () => {
+    expect(singleSentenceAtRange(sentences, { from: sentences[0].to - 2, to: sentences[1].from + 1 })).toBeUndefined();
+    expect(singleSentenceAtRange(sentences, { from: 0, to: 5 })).toBeUndefined();
+    expect(singleSentenceAtRange(sentences, { from: sentences[0].to + 1, to: sentences[0].to + 1 })).toBeUndefined();
+  });
+});
 
 describe('conservative sentence boundaries', () => {
   it('handles punctuation, quotes, offsets and line breaks', () => {
