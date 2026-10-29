@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { ArrowDownToLine, ArrowRight, BookOpen, Check, ChevronDown, Clock3, FilePlus2, FileText, FolderOpen, Leaf, PanelRightClose, PanelRightOpen, Pause, Play, Plus, Power, RotateCcw, Settings2, Sparkles, TextCursorInput, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, BookOpen, Check, ChevronDown, Clock3, FilePlus2, FileText, FolderOpen, PanelRightClose, PanelRightOpen, Pause, Play, Plus, Power, RotateCcw, Settings2, Sparkles, TextCursorInput, X } from 'lucide-react';
+import appIcon from '../icon/generated/app-icon.png';
 import { WritingEditor, type EditorHandle, type ProblemMark } from './editor/WritingEditor';
 import { FeedbackCard } from './components/FeedbackCard';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -281,10 +282,10 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
     finally { if (fullRequest.current === id) fullRequest.current = null; }
   };
 
-  if (bootError) return <div className="boot-screen"><Leaf size={34} /><h1>TOEFL Writing Assistant</h1><p>{bootError}</p></div>;
-  if (!ready) return <div className="boot-screen"><Leaf size={34} /><p>正在打开你的写作空间…</p></div>;
+  if (bootError) return <div className="boot-screen"><img src={appIcon} width={64} height={64} alt="" /><h1>Quillhaya - Writing Assistant</h1><p>{bootError}</p></div>;
+  if (!ready) return <div className="boot-screen"><img src={appIcon} width={64} height={64} alt="" /><p>正在打开你的写作空间…</p></div>;
   return <div className="app-shell" style={{ '--editor-font-size': `${settings.fontSize}px`, '--sidebar-width': `${sidebarWidth}%` } as CSSProperties}>
-    <header className="titlebar"><div className="app-brand"><span className="brand-mark"><Leaf size={16} /></span><span>TOEFL <b>Writing Assistant</b></span></div><div className="titlebar-actions"><span className="local-indicator"><span />本地写作空间</span><button className="icon-button" aria-label="打开设置" title="设置 ⌘," onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></div></header>
+    <header className="titlebar"><div className="app-brand"><span>Quillhaya - <b>Writing Assistant</b></span></div><div className="titlebar-actions"><span className="local-indicator"><span />本地写作空间</span><button className="icon-button" aria-label="打开设置" title="设置 ⌘," onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></div></header>
     <div className="workspace-toolbar"><div className="document-info"><FileText size={18} /><span className="document-name">{doc.name}</span><span className={`save-pill ${!doc.hasFile || doc.dirty ? 'unsaved' : ''}`}>{!doc.hasFile || doc.dirty ? '未保存至文件' : '已保存'}</span></div><div className="file-actions"><button className="icon-button" aria-label="新建文档" title="新建 ⌘N" disabled={fileBusy} onClick={() => void action('new')}><FilePlus2 size={17} /></button><button className="icon-button" aria-label="打开文档" title="打开 ⌘O" disabled={fileBusy} onClick={() => void action('open')}><FolderOpen size={18} /></button><button className="secondary-button compact" disabled={fileBusy} onClick={() => void action('save')}><ArrowDownToLine size={15} />保存<span className="shortcut">⌘S</span></button><span className="toolbar-divider" /><button className="icon-button" aria-label={collapsed ? '展开反馈' : '折叠反馈'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <PanelRightOpen size={19} /> : <PanelRightClose size={19} />}</button></div></div>
     {restored && <div className="restore-banner"><Check size={14} />已恢复上次会话。自动草稿不会覆盖原始 Markdown 文件。<button aria-label="关闭恢复提示" className="icon-button" onClick={() => setRestored(false)}><X size={14} /></button></div>}
     <main className={`workspace ${collapsed ? 'feedback-collapsed' : ''}`}>

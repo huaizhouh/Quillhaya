@@ -34,6 +34,6 @@ describe('native context menu lifecycle', () => {
     const items = (menu.buildFromTemplate.mock.calls as unknown as [MenuItemConstructorOptions[]][])[0][0];
     expect(items.find(i => i.label === '复制')?.enabled).toBe(false);
     expect(items.find(i => i.label === '剪切')?.enabled).toBe(false);
-    expect(items.find(i => i.label === '查询（Look Up）')).toBeUndefined();
+    expect(items.find(i => i.label === '查询')).toBeUndefined();
   });
 });

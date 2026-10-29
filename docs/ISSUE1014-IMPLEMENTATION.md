@@ -1,6 +1,6 @@
 # issue1014：续写提示、反馈分类与退出保存恢复
 
-日期：2026-10-16。对应 [issue1014.md](../issue/issue1014.md) 的三项问题。继续使用 Electron、React、TypeScript、Zod、CodeMirror 6 和 Node fetch；没有新增依赖。前次要求隐藏的上下文明细继续不出现在界面中。
+日期：2026-10-16。对应 [issue1014.md](../issues/issue1014.md) 的三项问题。继续使用 Electron、React、TypeScript、Zod、CodeMirror 6 和 Node fetch；没有新增依赖。前次要求隐藏的上下文明细继续不出现在界面中。
 
 ## 1. 顺序续写不提示前句上下文变化
 

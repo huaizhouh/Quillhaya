@@ -1,6 +1,6 @@
 # issue1020：连接失败详情与外部文件移动
 
-日期：2026-10-21。对应 [issue1020.md](../issue/issue1020.md)。沿用 Electron、React、TypeScript、Node fetch/fs、Zod、Vitest 和 Playwright；没有新增依赖或改动模型提示词。
+日期：2026-10-21。对应 [issue1020.md](../issues/issue1020.md)。沿用 Electron、React、TypeScript、Node fetch/fs、Zod、Vitest 和 Playwright；没有新增依赖或改动模型提示词。
 
 ## 1. 连接失败详情
 

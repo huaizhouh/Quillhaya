@@ -1,6 +1,6 @@
 # issue1022：原生右键菜单与每模型系统提示词
 
-日期：2026-10-23。对应 [issue1022.md](../issue/issue1022.md)。沿用 Electron、React、TypeScript、CodeMirror 6、Zod、Vitest 和 Playwright，没有新增依赖。
+日期：2026-10-23。对应 [issue1022.md](../issues/issue1022.md)。沿用 Electron、React、TypeScript、CodeMirror 6、Zod、Vitest 和 Playwright，没有新增依赖。
 
 ## 1. 用户可以怎样使用
 

@@ -11,3 +11,5 @@ playwright-report/
 .local-test/
 *.log
 tmp.md
+issues/*
+icon/*

@@ -11,7 +11,7 @@ export function installContextMenu(window: BrowserWindow, requestFeedback?: (req
     const items: MenuItemConstructorOptions[] = [];
     const separator = () => { if (items.length) items.push({ type: 'separator' }); };
     if (process.platform === 'darwin' && params.selectionText.trim() && params.formControlType !== 'input-password') {
-      items.push({ label: '查询（Look Up）', click: () => contents.showDefinitionForSelection() });
+      items.push({ label: '查询', click: () => contents.showDefinitionForSelection() });
       separator();
     }
     const { editFlags: flags } = params;

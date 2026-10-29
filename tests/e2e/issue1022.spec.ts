@@ -51,8 +51,8 @@ test('issue1022: native edit and Look Up actions work in editor, read-only feedb
   });
   const line = page.locator('.cm-line').first();
   const items = await menuOn(line, { x: 12, y: 10 });
-  expect(items.map(i => i.label)).toEqual(expect.arrayContaining(['查询（Look Up）', '剪切', '复制', '粘贴', '粘贴并匹配样式', '全选', '定位到写作反馈']));
-  for (const label of ['查询（Look Up）', '剪切', '复制', '粘贴', '粘贴并匹配样式']) await choose(label);
+  expect(items.map(i => i.label)).toEqual(expect.arrayContaining(['查询', '剪切', '复制', '粘贴', '粘贴并匹配样式', '全选', '定位到写作反馈']));
+  for (const label of ['查询', '剪切', '复制', '粘贴', '粘贴并匹配样式']) await choose(label);
   expect(await app.evaluate(() => (globalThis as unknown as MenuState).calls)).toEqual(['showDefinitionForSelection', 'cut', 'copy', 'paste', 'pasteAndMatchStyle']);
   await choose('全选'); await expect.poll(() => page.evaluate(() => window.getSelection()?.toString().trim())).toBe('Learning takes practice.');
   await page.keyboard.insertText('Learning takes practice.'); await expect(page.getByTestId('writing-editor')).toHaveText('Learning takes practice.');
@@ -66,7 +66,7 @@ test('issue1022: native edit and Look Up actions work in editor, read-only feedb
   expect(fields.map(i => i.label)).toContain('粘贴'); expect(fields.map(i => i.label)).not.toContain('定位到写作反馈');
   await page.getByLabel('Provider', { exact: true }).selectOption('custom');
   const key = page.getByLabel('API Key', { exact: true }); await key.fill('synthetic-secret'); await key.focus(); await page.keyboard.press('Meta+A');
-  const password = await menuOn(key, { x: 12, y: 10 }); expect(password.map(i => i.label)).not.toContain('查询（Look Up）');
+  const password = await menuOn(key, { x: 12, y: 10 }); expect(password.map(i => i.label)).not.toContain('查询');
 });
 
 test('issue1022: the real macOS context menu opens and closes without blocking the editor', async () => {

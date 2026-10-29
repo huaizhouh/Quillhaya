@@ -1,6 +1,6 @@
 # issue1013：保存状态、邮件分句、反馈保留与语法审议
 
-日期：2026-10-13。对应 [issue1013.md](../issue/issue1013.md) 的五项问题。沿用现有 Electron、React、TypeScript、CodeMirror 6、Zod 和 Node fetch；没有增加运行时依赖。此次验证使用隔离的界面测试目录，以及现有默认 Ollama gemma3:12b 的固定例句测试，没有修改真实模型配置、凭据或作文。
+日期：2026-10-13。对应 [issue1013.md](../issues/issue1013.md) 的五项问题。沿用现有 Electron、React、TypeScript、CodeMirror 6、Zod 和 Node fetch；没有增加运行时依赖。此次验证使用隔离的界面测试目录，以及现有默认 Ollama gemma3:12b 的固定例句测试，没有修改真实模型配置、凭据或作文。
 
 ## 1. 本次行为与代码入口
 

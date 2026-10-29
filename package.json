@@ -1,8 +1,8 @@
 {
-  "name": "toefl-writing-assistant",
+  "name": "quillhaya",
   "version": "1.0.0",
   "private": true,
-  "description": "A quiet, local-first TOEFL writing workspace for macOS",
+  "description": "A quiet, local-first English writing workspace for macOS",
   "main": "out/main/main.js",
   "type": "module",
   "engines": {
@@ -10,7 +10,10 @@
   },
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
+    "icons": "xcrun swift scripts/prepare-icons.swift",
+    "predev": "npm run icons",
     "dev": "electron-vite dev",
+    "prebuild": "npm run icons",
     "build": "tsc --noEmit && electron-vite build",
     "pack:mac": "npm run build && electron-builder --mac --arm64 --dir --publish never",
     "dist:mac": "npm run build && electron-builder --mac --arm64 --publish never",
@@ -30,7 +33,7 @@
   },
   "build": {
     "appId": "com.zloyan.writingassistant",
-    "productName": "Writing Assistant",
+    "productName": "Quillhaya",
     "directories": {
       "output": "dist"
     },
@@ -43,7 +46,7 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": [{ "target": "dmg", "arch": ["arm64"] }],
-      "icon": null,
+      "icon": "icon/generated/app-icon.icns",
       "identity": "-",
       "hardenedRuntime": false,
       "notarize": false

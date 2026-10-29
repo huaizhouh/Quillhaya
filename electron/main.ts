@@ -14,9 +14,10 @@ import { ConnectionDiagnostics, diagnosticHTML, type ConnectionReport } from './
 import { installContextMenu } from './context-menu';
 
 const here = dirname(fileURLToPath(import.meta.url));
+// Keep the pre-ready name: Electron 44 uses it to initialize the macOS
+// Keychain service. Rename the visible app after ready so existing keys decrypt.
+// The data directory also stays stable; tests always use an isolated override.
 app.setName('TOEFL Writing Assistant');
-// Keep the existing storage location when the packaged product name changes.
-// Automated tests always override it with an isolated temporary directory.
 app.setPath('userData', process.env.TWA_TEST_USER_DATA || join(app.getPath('appData'), 'TOEFL Writing Assistant'));
 let window: BrowserWindow | null = null;
 let detailsWindow: BrowserWindow | null = null;
@@ -207,7 +208,7 @@ async function createWindow() {
   rendererFailed = false;
   recoveryWrite = Promise.resolve();
   window = new BrowserWindow({ width: 1380, height: 910, minWidth: 940, minHeight: 650, show: false,
-    title: 'TOEFL Writing Assistant', titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 22, y: 23 },
+    title: 'Quillhaya - Writing Assistant', titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 22, y: 23 },
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d2423' : '#f7f8f5',
     webPreferences: { preload: join(here, '../preload/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false }
   });
@@ -224,6 +225,8 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  app.setName('Quillhaya');
+  if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(here, '../../icon/generated/app-icon.png'));
   store = new LocalStore(app.getPath('userData')); await store.init();
   nativeTheme.themeSource = store.settings.theme;
   documents = new Documents(store, () => window!);

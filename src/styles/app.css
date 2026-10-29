@@ -15,9 +15,8 @@ button { transition: background .12s, color .12s; }
 button svg { flex-shrink: 0; }
 .app-shell { height: 100vh; min-height: 530px; display: flex; flex-direction: column; overflow: hidden; }
 .titlebar { height: 64px; min-height: 64px; display: flex; align-items: center; padding: 0 22px 0 98px; -webkit-app-region: drag; border-bottom: 1px solid var(--line); }
-.app-brand { display: flex; align-items: center; gap: 9px; font-size: 12px; letter-spacing: .1px; font-weight: 650; }
+.app-brand { font-size: 12px; letter-spacing: .1px; font-weight: 650; }
 .app-brand b { font-weight: 450; color: var(--secondary); margin-left: 3px; }
-.brand-mark { width: 29px; height: 29px; display: grid; place-items: center; background: var(--accent); color: var(--paper); border-radius: 9px; }
 .titlebar-actions { margin-left: auto; display: flex; align-items: center; gap: 18px; }
 .local-indicator { color: var(--secondary); font-size: 11px; display: flex; align-items: center; gap: 7px; }
 .local-indicator > span { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }

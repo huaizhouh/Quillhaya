@@ -1,14 +1,15 @@
-# 技术实现说明：TOEFL Writing Assistant
+# 技术实现说明：Quillhaya - Writing Assistant
 
+最新羽毛图标与 macOS 尺寸适配见 [ICON-ADAPTATION.md](ICON-ADAPTATION.md)。
 这份文档描述当前源码中**已经实现**的功能与方法，用于对照代码审阅。运行方式见 [README](../README.md)，实际测试记录见 [VALIDATION](VALIDATION.md)。
 
-最新原生右键菜单、正文到反馈定位及每模型额外系统提示词见 [issue1022 实现说明](ISSUE1022-IMPLEMENTATION.md)。连接测试详情及外部移动文件处理见 [issue1020 实现说明](ISSUE1020-IMPLEMENTATION.md)，本轮未增加依赖。此前见 [issue1018 实现说明](ISSUE1018-IMPLEMENTATION.md)、[issue1014 实现说明](ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](ISSUE1012-IMPLEMENTATION.md)，初次四项修复保留在 [历史修复说明](FIXES-2026-10-12.md)。
+最新命名、图标和存储兼容性见 [issue1029 实现说明](ISSUE1029-IMPLEMENTATION.md)，打包命令与产物说明见 [PACKAGING.md](PACKAGING.md)。原生右键菜单、正文到反馈定位及每模型额外系统提示词见 [issue1022 实现说明](ISSUE1022-IMPLEMENTATION.md)。连接测试详情及外部移动文件处理见 [issue1020 实现说明](ISSUE1020-IMPLEMENTATION.md)，本轮未增加依赖。此前见 [issue1018 实现说明](ISSUE1018-IMPLEMENTATION.md)、[issue1014 实现说明](ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](ISSUE1012-IMPLEMENTATION.md)，初次四项修复保留在 [历史修复说明](FIXES-2026-10-12.md)。
 
 ## 1. 技术栈和选型
 
 | 层次 | 实际技术 / 验证版本 | 作用与选择理由 |
 | --- | --- | --- |
-| 开发运行环境 | Conda、Node.js 22.23.2、macOS arm64 | Conda 只负责 Node 环境；所有应用依赖由 npm 锁文件管理 |
+| 开发运行环境 | Node.js 24.4.1、macOS arm64 | 直接使用 Node/npm；应用依赖由 npm 锁文件管理 |
 | 桌面框架 | Electron 44.7.0 | 原生窗口、macOS 菜单、文件对话框、受控文件与网络操作 |
 | 构建 | electron-vite 4.0.1、Vite 6.4.4、electron-builder 26.15.3 | 构建主进程、preload 和 renderer；另可生成 macOS arm64 `.app` 和 DMG |
 | 语言 | TypeScript（严格类型检查） | 主进程、界面和共享协议统一类型；无 Python 后端 |
@@ -21,7 +22,7 @@
 | 逻辑测试 | Vitest 5.0.3、jsdom | 分句、调度、响应校验、Provider、队列、存储、CodeMirror 撤销 |
 | 桌面测试 | Playwright 1.64.0 + Electron | 实际窗口、IPC、编辑器、菜单、文件流程和 HTTP 集成 |
 
-`package.json` 使用兼容版本范围，**实际安装版本由 `package-lock.json` 固定**。最低 Node 为 22.12，来自当前 Electron/electron-vite 的要求。Electron 内嵌的 Node 与开发 shell 的 Node 是两个运行时；Conda 提供的是构建、npm 和测试所用的 Node。
+`package.json` 使用兼容版本范围，**实际安装版本由 `package-lock.json` 固定**。最低 Node 为 22.12，来自当前 Electron/electron-vite 的要求。Electron 内嵌的 Node 与开发 shell 的 Node 是两个运行时；系统安装的 Node 用于构建、npm 和测试。
 
 没有使用普通 textarea/contenteditable 自建正文编辑器。CodeMirror 内部虽然使用 contenteditable 接收输入，但文档、选区、组合态和撤销均由 CodeMirror 管理。题目区和设置字段的 textarea 只是普通表单控件。
 

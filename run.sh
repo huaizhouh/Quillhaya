@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 if ! command -v node >/dev/null 2>&1; then
-  echo "未找到 Node.js。请先 conda activate toefl-writing-assistant。" >&2
+  echo "未找到 Node.js。请先安装 Node.js 22.12 或以上版本，并确保 node 和 npm 可在终端运行。" >&2
   exit 1
 fi
 node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 12)) { console.error("需要 Node.js 22.12 或以上版本"); process.exit(1); }'

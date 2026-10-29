@@ -1,6 +1,6 @@
 # issue1018：忽略反馈行为修复与 Apple Silicon 打包
 
-日期：2026-10-18。对应 [issue1018.md](../issue/issue1018.md)。本次沿用 Electron、React、TypeScript、CodeMirror 6、Vitest 和 Playwright；新增开发依赖 `electron-builder 26.15.3`，没有新增应用运行时依赖。原有依赖版本没有变更。
+日期：2026-10-18。对应 [issue1018.md](../issues/issue1018.md)。本次沿用 Electron、React、TypeScript、CodeMirror 6、Vitest 和 Playwright；新增开发依赖 `electron-builder 26.15.3`，没有新增应用运行时依赖。原有依赖版本没有变更。
 
 ## 1. 忽略句子后保留卡片
 

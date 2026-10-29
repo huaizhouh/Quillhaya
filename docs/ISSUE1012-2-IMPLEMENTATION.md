@@ -1,6 +1,6 @@
 # issue1012_2：输入调度、正文标记与退出清理
 
-日期：2026-10-12。对应 [issue/issue1012_2.md](../issue/issue1012_2.md) 的四项问题。本次继续使用 Electron + React + TypeScript + CodeMirror + Zod + Node fetch，没有新增运行时依赖，没有修改用户实际设置、凭据或作文。
+日期：2026-10-12。对应 [issue/issue1012_2.md](../issues/issue1012_2.md) 的四项问题。本次继续使用 Electron + React + TypeScript + CodeMirror + Zod + Node fetch，没有新增运行时依赖，没有修改用户实际设置、凭据或作文。
 
 > 本文保留当时的实现与验收记录。2026-10-13 已将“修改已有句子”的默认等待改为独立 3000 ms，并保留修改中的旧反馈；设置位置与当前规则见 [issue1013 实现说明](ISSUE1013-IMPLEMENTATION.md)。下文的默认 1200 ms 为历史行为。
 

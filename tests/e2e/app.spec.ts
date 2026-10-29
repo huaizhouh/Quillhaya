@@ -26,13 +26,16 @@ async function chooseMockBehavior(value: string) {
 }
 
 test('real sandboxed Electron window, native menus and isolated API', async () => {
-  const security = await app.evaluate(({ BrowserWindow, Menu }) => {
+  const security = await app.evaluate(({ app: main, BrowserWindow, Menu }) => {
     const preferences = (BrowserWindow.getAllWindows()[0].webContents as unknown as { getLastWebPreferences(): { contextIsolation: boolean; sandbox: boolean; nodeIntegration: boolean } }).getLastWebPreferences();
     const menu = Menu.getApplicationMenu();
-    return { isolation: preferences.contextIsolation, sandbox: preferences.sandbox, node: preferences.nodeIntegration,
+    return { name: main.getName(), menuName: menu?.items[0].label, isolation: preferences.contextIsolation, sandbox: preferences.sandbox, node: preferences.nodeIntegration,
       fileMenu: menu?.items.find(i => i.label === '文件')?.submenu?.items.map(i => ({ label: i.label, accelerator: i.accelerator })) };
   });
-  expect(security).toMatchObject({ isolation: true, sandbox: true, node: false });
+  expect(security).toMatchObject({ name: 'Quillhaya', menuName: 'Quillhaya', isolation: true, sandbox: true, node: false });
+  await expect(page).toHaveTitle('Quillhaya - Writing Assistant');
+  await expect(page.locator('.app-brand')).toHaveText('Quillhaya - Writing Assistant');
+  await expect(page.locator('.app-brand img')).toHaveCount(0);
   expect(security.fileMenu).toContainEqual({ label: '保存', accelerator: 'CmdOrCtrl+S' });
   expect(await page.evaluate(() => ({ require: typeof (window as unknown as { require?: unknown }).require, hasAnalyze: typeof window.desktop.analyze, hasFS: 'readFile' in window.desktop }))).toEqual({ require: 'undefined', hasAnalyze: 'function', hasFS: false });
   const invalid = await page.evaluate(() => window.desktop.analyze({ unexpected: true } as never));
@@ -456,4 +459,29 @@ test('issue1012: stop cancels active and queued inference, unloads and prevents 
     expect(server.requests.map(r => [r.path, r.model])).toEqual([['/v1/chat/completions', 'background'], ['/api/generate', 'background']]);
     await expect(page.getByTestId('writing-editor')).toBeFocused();
   } finally { await server.close(); }
+});
+
+
+test('issue1029: renamed app decrypts the previous app namespace without migrating credentials', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'quillhaya-legacy-'));
+  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)), TWA_TEST_USER_DATA: directory };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const legacy = await electron.launch({ args: [resolve('tests/fixtures/legacy-storage.cjs')], env });
+  try {
+    const ciphertext = await legacy.evaluate(async ({ app: main, safeStorage }) => {
+      await main.whenReady();
+      return safeStorage.encryptString('synthetic-issue1029-credential').toString('base64');
+    });
+    const readable = await app.evaluate(({ app: main, safeStorage }, ciphertext) => {
+      // This isolated process has not used safeStorage yet. Match the native
+      // Keychain used by the legacy fixture and production bundles.
+      main.commandLine.removeSwitch('use-mock-keychain');
+      main.commandLine.removeSwitch('password-store');
+      return { name: main.getName(), value: safeStorage.decryptString(Buffer.from(ciphertext, 'base64')) };
+    }, ciphertext);
+    expect(readable).toEqual({ name: 'Quillhaya', value: 'synthetic-issue1029-credential' });
+  } finally {
+    const closed = legacy.waitForEvent('close'); await legacy.evaluate(({ app: main }) => main.exit(0)); await closed;
+    await (await import('node:fs/promises')).rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
 });

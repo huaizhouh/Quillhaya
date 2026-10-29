@@ -1,8 +1,59 @@
 # 实际验收记录
 
-最新验证日期：2026-10-23。以下区分本次修复复验与初版历史记录，只记录实际执行的检查。
+最新验证日期：2026-10-29。以下区分本次修复复验与初版历史记录，只记录实际执行的检查。
 
-## 2026-10-23 issue1022 原生右键菜单、反馈定位和每模型系统提示词（最新）
+## 2026-10-29 移除主界面标题旁图标（最新微调）
+
+按用户要求删除左上角名称旁的图片及专用 CSS，只保留 `Quillhaya - Writing Assistant` 文字；Dock、安装包及启动页图标保留。同步调整已有界面和安装包检查，技术说明见 [ICON-ADAPTATION.md](ICON-ADAPTATION.md)。
+
+`npm run dist:mac`（包含类型检查及生产构建）通过，已更新 `.app`、DMG 和 blockmap；两项既有界面用例通过（5.1 秒），确认品牌区无图片并重新生成明暗截图。新 `.app` 的 `codesign --verify --deep --strict` 与 `git diff --check` 通过。本次只改动界面呈现，未重复运行全量单元测试或涉及系统钥匙串的完整安装包冒烟。
+
+## 2026-10-29 羽毛图标替换及 macOS 尺寸适配
+
+用户更新了 `icon/` 并提供 Dock 大小不匹配截图。本次按用户确认采用确定性脚本，原图保留，不采用生成式工具的草图。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 原图完整性 | `icon/icon.png` 的 SHA-256 仍为 `615c19c88c70b9ac561fee525a487bc2d1cae97c8be6cc17e032d2b57eb5affd`；仅在 `icon/generated/` 写入适配产物 |
+| 图标尺寸与透明边距 | 1024px 母版的实体边界为 `[100, 100, 924, 924)`，宽度占比 80.47%；本机 Photo Booth 参照图标的相同比例也是 80.47%（alpha > 127） |
+| ICNS 往返解包 | `iconutil` 解包后 10 个标准尺寸 / Retina 文件的像素大小正确，均保留 alpha 通道 |
+| `npm run check` | 类型检查、**10 个文件 / 115 项单元测试**和生产构建通过；自动执行图标生成步骤 |
+| `playwright test tests/e2e/app.spec.ts --grep 'real sandboxed\|captures the implemented'` | **2 项通过，4.6 秒**；验证实际页面资源、1024px 尺寸、透明边界、圆角像素、标题栏透明底色，并更新明暗截图 |
+| `npm run test:dev` | `bash run.sh → 图标预处理 → Vite → Electron → Mock → 接受修改` 通过，Node 24.4.1 / arm64 |
+| `npm run dist:mac` | 重新生成含羽毛图标的 `Quillhaya.app`、约 128 MiB 的 `Quillhaya-1.0.0-arm64.dmg` 及 blockmap |
+| `npm run test:package` | 通过；包内 ICNS 与生成文件逐字节一致，页面 PNG 与生成母版逐字节一致；旧密文解密、沙箱、Mock 反馈、忽略/重评/接受修改通过 |
+| `codesign --verify --deep --strict` | 新应用 ad-hoc 签名校验通过；仍未公证 |
+| 视觉检查 | 已查看新图标母版、32px 图标、与系统图标的尺寸对照预览、应用明暗主题截图；圆角边缘干净，无旧绿色底框 |
+| `git diff --check` | 通过 |
+
+最初安装包测试新增的资源读取断言使用动态 `import`，Playwright 的主进程求值上下文不支持该方式，导致测试中断；改为通过 `process.getBuiltinModule` 读取本地资源后重跑通过。此次重签名的应用访问系统钥匙串时，用户在系统弹窗中允许后完成验证。测试未更改实际模型设置或作文。
+
+本次运行了与图标相关的 2 项界面用例及完整安装包冒烟，没有重复运行全部 46 项界面回归；下方 46 项记录属于同日首次命名调整。具体实现与资源流向见 [ICON-ADAPTATION.md](ICON-ADAPTATION.md)。
+
+## 2026-10-29 issue1029 Quillhaya 命名、图标和发布准备（当日首次验证）
+
+项目目录：`/Users/zhaoyanximo/AIhzHuang/Project/Quillhaya`。使用本机 Node 24.4.1 / npm 11.4.2 / arm64。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| `npm run check` | 类型检查、**10 个文件 / 115 项单元测试**及生产构建通过 |
+| 已构建产物：`playwright test` | **46 项真实 Electron E2E 全部通过，约 2.0 分钟**；覆盖新运行时名称、系统菜单名、窗口标题、PNG 加载与中文“查询”标签 |
+| 兼容测试修正后的定向复验 | `playwright test tests/e2e/app.spec.ts --grep issue1029`：**1 项通过，1.3 秒**；移除模拟钥匙串开关后，旧名称测试进程的合成密文仍可被新源码应用解密 |
+| 无 Conda 开发启动 | 清除 `CONDA_PREFIX` / `CONDA_DEFAULT_ENV` 并仅使用 Homebrew Node 和系统 PATH，`npm run test:dev` 通过 `bash run.sh → Vite → Electron → Mock → 接受修改` 完整流程 |
+| `npm run dist:mac` | 成功生成 `dist/mac-arm64/Quillhaya.app`、`dist/Quillhaya-1.0.0-arm64.dmg`（约 127 MiB）及 blockmap，未发布 |
+| `npm run test:package` | 修正测试钥匙串后通过：实际 arm64 安装包名称、Bundle ID、ICNS 字节、图标资源、沙箱、本地页面、旧密文解密、Mock 反馈、忽略/重评/接受修改 |
+| 旧安装包直接对照 | 只读挂载此前 `Writing Assistant-1.0.0-arm64.dmg`，由其中实际旧应用加密合成字符串，新 `Quillhaya.app` 成功解密；双方使用隔离用户目录与真实系统钥匙串 |
+| `codesign --verify --deep --strict` | 新 `Quillhaya.app` 的本机 ad-hoc 签名校验通过；未配置 Developer ID 或公证 |
+| README 与视觉检查 | README 无 TOEFL/toefl、Conda 或打包教程；已查看更新后的明暗主题截图，新名称和图标显示正常 |
+| `bash -n run.sh`、`git diff --check` | 通过 |
+
+完整 46 项回归中的最初兼容用例使用了 Playwright 注入的模拟钥匙串，不能单独证明系统钥匙串兼容。首次打包冒烟在用户允许系统授权后仍解密失败，原因是旧名称测试进程使用模拟钥匙串，而实际安装包使用真实钥匙串。已修正测试夹具与定向用例，移除模拟开关；上述 1 项定向测试、完整安装包冒烟及实际旧安装包对照均在真实钥匙串下通过。生产应用无需为这一测试问题另加兼容分支。
+
+本次测试均使用临时数据目录、合成凭据及 Mock / 本地测试 HTTP 服务，不调用真实模型、不修改用户已有作文或模型配置。钥匙串验证通过系统接口获取应用的存储加密能力，没有导出系统密钥或读取用户 API Key。历史问题截图已恢复，只有 README 的两张主界面截图更新。
+
+技术栈、名称生效逻辑及数据兼容策略：[ISSUE1029-IMPLEMENTATION.md](ISSUE1029-IMPLEMENTATION.md)。构建命令与签名状态：[PACKAGING.md](PACKAGING.md)。
+
+## 2026-10-23 issue1022 原生右键菜单、反馈定位和每模型系统提示词（历史记录）
 
 | 检查 | 实际结果 |
 | --- | --- |

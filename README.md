@@ -1,27 +1,19 @@
-# TOEFL Writing Assistant
+# Quillhaya - Writing Assistant
 
 一个以写作为中心的 macOS Electron 桌面应用：左侧是 CodeMirror 6 Markdown 编辑器，右侧提供不打断输入的中文反馈。建议只在点击“接受修改”后应用，可通过 ⌘Z 撤销。
 
 ![实际运行界面](docs/workspace-light.png)
 
-## 启动
+## 从源码启动
 
-在项目目录执行：
-
-```bash
-conda env create -f environment.yml
-conda activate toefl-writing-assistant
-bash run.sh
-```
-
-环境仅使用 `conda-forge` 提供 Node.js 22，不需要 Python/pip。需要 **Node.js ≥ 22.12**。`run.sh` 在首次运行、Electron 运行时缺失或锁文件变化后执行 `npm ci`，然后启动 Electron 开发版。首次安装还会下载官方 Electron 运行时，需联网。推荐 Apple Silicon 原生 arm64 环境，当前 Electron 要求 macOS Ventura 13 或以上。
-
-也可直接使用 Node：
+先安装 **Node.js ≥ 22.12**（含 npm），推荐使用 Apple Silicon 原生 arm64 版本。源码开发还需要 macOS 的 Xcode Command Line Tools，以生成应用图标；已安装完整 Xcode 时可直接使用。在项目目录执行：
 
 ```bash
 npm ci
 npm run dev
 ```
+
+也可运行 `bash run.sh`，脚本会检查 Node.js 版本、按需安装依赖并启动应用。首次安装需要联网下载 Electron 运行时。
 
 只编译源码、然后运行本地构建：
 
@@ -29,22 +21,6 @@ npm run dev
 npm run build
 npm start
 ```
-
-`build` 仅生成 `out/` 中的 JS、HTML、CSS，不生成 `.app`、DMG，不签名、不公证。`node_modules/electron/dist/Electron.app` 是下载的 Electron 开发运行时，不是本项目的应用打包产物。
-
-## 打包 Apple Silicon 应用
-
-在 macOS 上安装依赖后执行：
-
-```bash
-npm run pack:mac       # 生成 dist/mac-arm64/Writing Assistant.app
-npm run dist:mac       # 生成上述 .app 和 dist/Writing Assistant-1.0.0-arm64.dmg
-npm run test:package   # 使用临时用户目录验证已生成的 .app
-```
-
-`package.json` 的 `build` 配置已设置 `appId: com.zloyan.writingassistant`、`productName: Writing Assistant`，目标架构为 Apple Silicon `arm64`。`mac.category` 是应用用途分类，因此设为 `public.app-category.productivity`（效率工具），不是 CPU 类型；`mac.icon` 暂为 `null`，使用 Electron 默认图标。配置字段见 [electron-builder macOS 文档](https://www.electron.build/v26/docs/mac/)。
-
-当前产物采用本机 ad-hoc 签名，未使用 Developer ID 证书、未公证；打包命令不发布。正式对外分发前需配置自己的签名、公证和图标。打包只包含编译产物、包元数据及生产依赖，源码目录中的作文、issue 和配置文件不会被一并打入。运行时沿用 `~/Library/Application Support/TOEFL Writing Assistant`，以便继续读取现有模型配置和草稿。
 
 ## 先试一下
 
@@ -59,7 +35,7 @@ Learning takes practice.
 
 支持 Academic Discussion、Email Writing、General English 三种模式。题目/教授提问/邮件情境在独立区域输入，不计入作文字数，可拖动底部横向手柄调整高度。计时器从本次会话首次输入开始；右侧支持暂停、继续和复位，复位后保持暂停，供自行控制练习时间。
 
-正文或设置输入框中右键可使用查询（Look Up）、剪切、复制、粘贴、粘贴并匹配样式和全选。正文右键位置或选区仅属于一句时，还可“定位到写作反馈”，自动展开侧栏并突出对应卡片；选区跨句时不显示此项。
+正文或设置输入框中右键可使用查询、剪切、复制、粘贴、粘贴并匹配样式和全选。正文右键位置或选区仅属于一句时，还可“定位到写作反馈”，自动展开侧栏并突出对应卡片；选区跨句时不显示此项。
 
 ## 模型配置
 
@@ -128,7 +104,7 @@ Temperature 留空时不发送该参数。附加 Headers 仅用于非密钥信�
 
 正常关闭窗口或按 ⌘Q，会先完成保存确认及草稿写入，取消请求并等待本应用使用过的 Ollama 模型卸载，再关闭。若实际清理失败，可重试、返回写作或选择仍然关闭。已删除的旧模型 ID 返回 404 时，会通过 `/api/ps` 核验是否已不驻留，避免误报。
 
-macOS 默认数据目录：`~/Library/Application Support/TOEFL Writing Assistant/`。
+应用数据保存在 macOS 用户的 Application Support 目录。升级后沿用已有数据位置，保留模型配置、密钥和草稿；具体兼容策略见 [本次实现说明](docs/ISSUE1029-IMPLEMENTATION.md#存储兼容性)。
 
 | 文件 | 内容 |
 | --- | --- |
@@ -191,7 +167,6 @@ tests/
   e2e/app.spec.ts             实际 Electron 流程与真实本地 HTTP 测试
 scripts/dev-smoke.mjs         run.sh → Vite → Electron 开发启动验证
 docs/                        实际截图与验收记录
-environment.yml              Conda Node.js 22
 run.sh                       源码启动入口
 package.json / package-lock.json
 electron.vite.config.ts / tsconfig.json
@@ -221,13 +196,12 @@ E2E 使用下载的 Electron 自身，不需要另外下载 Playwright Chromium�
 
 可选执行 `npm run test:ollama:balance`，检查 issue1014 的语法误报、可选优化保留及混合建议，沿用同样的本机配置与测试模型释放规则。
 
-最新右键菜单、反馈定位及每模型系统提示词见 [issue1022 实现说明](docs/ISSUE1022-IMPLEMENTATION.md)；连接测试详情与文件移动处理见 [issue1020 实现说明](docs/ISSUE1020-IMPLEMENTATION.md)；此前见 [issue1018 实现说明](docs/ISSUE1018-IMPLEMENTATION.md)、 [issue1014 实现说明](docs/ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](docs/ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](docs/ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](docs/ISSUE1012-IMPLEMENTATION.md) 和 [历史修复说明](docs/FIXES-2026-10-12.md)。
+羽毛图标的 macOS 尺寸适配见 [图标实现说明](docs/ICON-ADAPTATION.md)；应用命名和文档调整见 [issue1029 实现说明](docs/ISSUE1029-IMPLEMENTATION.md)；右键菜单、反馈定位及每模型系统提示词见 [issue1022 实现说明](docs/ISSUE1022-IMPLEMENTATION.md)；连接测试详情与文件移动处理见 [issue1020 实现说明](docs/ISSUE1020-IMPLEMENTATION.md)；此前见 [issue1018 实现说明](docs/ISSUE1018-IMPLEMENTATION.md)、 [issue1014 实现说明](docs/ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](docs/ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](docs/ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](docs/ISSUE1012-IMPLEMENTATION.md) 和 [历史修复说明](docs/FIXES-2026-10-12.md)。
 
 ## 故障排查
 
-- **Node 版本错误 / Rosetta 混用**：激活 Conda 后运行 `node -p 'process.version + " " + process.arch'`，应为 Node 22.12+、`arm64`。在原生 arm64 终端安装环境。
+- **Node 版本错误 / Rosetta 混用**：在终端运行 `node -p 'process.version + " " + process.arch'`，应为 Node 22.12+、`arm64`。在原生 arm64 终端安装环境。
 - **Electron 下载断开**：先重试 `npx --no install-electron`。若官方 GitHub 下载在当前网络不可用，可用 Electron 文档列出的镜像：`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npx --no install-electron`。安装器会校验校验和。也可给 `bash run.sh` 添加同一环境变量。
-- **Conda TLS/元数据错误**：检查系统时间、代理与可信证书后重试。可尝试 `CONDA_REPODATA_USE_ZST=false conda env create -f environment.yml`；不要关闭 TLS 校验。
 - **401/403**：检查 API Key、认证方式和该服务的权限。密钥绑定端点，修改地址后需重新输入。
 - **404 / 模型不存在**：检查 Base URL 是否包含服务要求的 `/v1`，以及 Model 是否与服务端加载的 ID 一致。
 - **429**：应用已有限重试，可暂停自动分析、增加停顿延迟或等待服务额度恢复。
@@ -240,11 +214,11 @@ E2E 使用下载的 Electron 自身，不需要另外下载 Playwright Chromium�
 ## 首版边界
 
 - 已完成本地 Ollama `gemma3:12b` 结构化反馈及卸载生命周期实测，以及 `gemma4:12b-mlx` 的固定句子分析、Electron 原生退出卸载实测。Mock fetch 和本地 HTTP 回归也已通过。此前旧 ID `gemma4:12b` 的 30 秒超时记录保留在验收文档中；其他具体模型与真实云端账户未逐一实测。
-- 不提供官方 TOEFL 分数，不自动代写全文。
+- 不提供官方考试分数，不自动代写全文。
 - 未实现 Markdown 渲染预览、模型列表自动发现和 Anthropic/Gemini 原生协议；编辑器本身有 Markdown 语法高亮。
 - 保守分句不覆盖所有英语语言现象；包含行内代码或 URL 的整句会被跳过。跨行未结束的句子暂按不完整片段处理。自动分句缓存、忽略状态及计时器只在本次会话中有效。
-- 本地文件上限 500,000 字符，单次全文分析上限 50,000 字符。为 TOEFL 篇幅设计，超长文档未做性能承诺。
-- 单文档主窗口（另有连接测试详情窗口）、单份最近草稿；不实现多文档标签、历史版本库、账号、同步、支付或多人协作。已支持 macOS arm64 本地打包，未配置正式签名、公证和自动更新。
+- 本地文件上限 500,000 字符，单次全文分析上限 50,000 字符。面向短篇英语写作设计，超长文档未做性能承诺。
+- 单文档主窗口（另有连接测试详情窗口）、单份最近草稿；不实现多文档标签、历史版本库、账号、同步、支付或多人协作。暂不支持自动更新。
 - 自动化已覆盖组合态调度；真实系统输入法的所有候选窗行为仍需人工使用验证。
 
 ## 参考文档

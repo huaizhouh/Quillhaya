@@ -13,21 +13,39 @@ const info = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o
 assert.equal(info.CFBundleIdentifier, pkg.build.appId);
 assert.equal(info.CFBundleDisplayName, pkg.build.productName);
 assert.equal(info.LSApplicationCategoryType, pkg.build.mac.category);
+assert.equal(info.CFBundleName, pkg.build.productName);
+assert.equal(info.CFBundleExecutable, pkg.build.productName);
+const bundledIcon = join(bundle, 'Contents/Resources', info.CFBundleIconFile);
+assert.deepEqual(await readFile(bundledIcon), await readFile(resolve(pkg.build.mac.icon)), 'The bundle must contain the freshly prepared macOS ICNS.');
 const directory = await mkdtemp(join(tmpdir(), 'twa-package-'));
 const env = { ...process.env, TWA_TEST_USER_DATA: directory };
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.ELECTRON_RENDERER_URL;
-let app;
+let app, legacy;
 try {
+  // Encrypt a synthetic string with the old namespace, then open the renamed bundle.
+  legacy = await electron.launch({ args: [resolve('tests/fixtures/legacy-storage.cjs')], env: { ...env, TWA_TEST_USER_DATA: join(directory, 'legacy') } });
+  const ciphertext = await legacy.evaluate(async ({ app, safeStorage }) => {
+    await app.whenReady();
+    if (app.commandLine.hasSwitch('use-mock-keychain')) throw new Error('Legacy compatibility requires the native Keychain.');
+    return safeStorage.encryptString('synthetic-package-legacy').toString('base64');
+  });
+  const legacyClosed = legacy.waitForEvent('close', { timeout: 10_000 });
+  await legacy.evaluate(({ app }) => app.exit(0)); await legacyClosed; legacy = undefined;
   app = await electron.launch({ executablePath: join(bundle, 'Contents/MacOS', info.CFBundleExecutable), env });
   const runtime = await app.evaluate(({ app, BrowserWindow }) => {
     const { sandbox, contextIsolation, nodeIntegration } = BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences();
-    return { packaged: app.isPackaged, architecture: process.arch, directory: app.getPath('userData'), sandbox, contextIsolation, nodeIntegration };
+    if (app.commandLine.hasSwitch('use-mock-keychain')) throw new Error('The packaged smoke test must use the native Keychain.');
+    return { name: app.getName(), packaged: app.isPackaged, architecture: process.arch, directory: app.getPath('userData'), sandbox, contextIsolation, nodeIntegration };
   });
-  assert.deepEqual(runtime, { packaged: true, architecture: 'arm64', directory, sandbox: true, contextIsolation: true, nodeIntegration: false });
+  assert.deepEqual(runtime, { name: 'Quillhaya', packaged: true, architecture: 'arm64', directory, sandbox: true, contextIsolation: true, nodeIntegration: false });
   const page = await app.firstWindow(), editor = page.getByTestId('writing-editor');
   await expect(editor).toBeVisible();
   assert.match(page.url(), /^file:/);
+  await expect(page).toHaveTitle('Quillhaya - Writing Assistant');
+  await expect(page.locator('.app-brand')).toHaveText('Quillhaya - Writing Assistant');
+  await expect(page.locator('.app-brand img')).toHaveCount(0);
+  assert.equal(await app.evaluate(({ safeStorage }, text) => safeStorage.decryptString(Buffer.from(text, 'base64')), ciphertext), 'synthetic-package-legacy');
   const boot = await page.evaluate(() => window.desktop.bootstrap());
   assert.equal(boot.ok, true);
   assert.equal(boot.value.settings.profiles.find(p => p.id === boot.value.settings.defaultProfileId).kind, 'mock');
@@ -43,6 +61,7 @@ try {
   await card.getByRole('button', { name: '接受修改', exact: true }).click();
   await expect(editor).toHaveText('He goes home.');
 } finally {
+  if (legacy) await legacy.close().catch(() => {});
   if (app) {
     const closed = app.waitForEvent('close', { timeout: 10_000 });
     await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
@@ -50,4 +69,4 @@ try {
   }
   await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
-console.log('PASS: packaged arm64 app identity, sandbox, local assets, Mock feedback, ignore/reevaluate and accept.');
+console.log('PASS: Quillhaya arm64 bundle identity, prepared ICNS icon and text-only titlebar, legacy credential decryption, sandbox, local assets and writing workflow.');
