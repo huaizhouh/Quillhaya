@@ -46,6 +46,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   const timer = useWritingTimer();
   const [modelsStopped, setModelsStopped] = useState(false);
   const [modelStopping, setModelStopping] = useState(false);
+  const analysisSettingsWrite = useRef<Promise<unknown>>(Promise.resolve());
   const [closing, setClosing] = useState(false);
   const closingDialog = useRef<HTMLDialogElement>(null);
   const automatic = settings.autoAnalyze && !modelsStopped;
@@ -190,7 +191,10 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
         if (fullRequest.current) { void window.desktop.cancel(fullRequest.current); fullRequest.current = null; }
         setFull(entry => entry ? { ...entry, requestId: undefined, state: entry.result ? 'done' : 'pending' } : null);
         setClosing(true);
-        try { const reply = await window.desktop.close(docRef.current); if (!reply.ok) notify(reply.error.message); }
+        try {
+          await analysisSettingsWrite.current.catch(() => {});
+          const reply = await window.desktop.close(docRef.current); if (!reply.ok) notify(reply.error.message);
+        }
         finally { setClosing(false); }
       }
     } catch { if (command === 'close') void window.desktop.cancelClose(); notify('文件操作失败，请检查权限后重试。'); }
@@ -226,18 +230,34 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
     }
     notify('已接受修改 · 可使用 ⌘Z 撤销');
   };
-  const saveSettings = (next: Settings, status = keyStatus, analysisChanged = true) => { setSettings(next); setKeyStatus(status); if (analysisChanged) setConfigVersion(v => v + 1); };
+  const saveSettings = (next: Settings, status = keyStatus, analysisChanged = true) => { setSettings(next); setKeyStatus(status); setModelsStopped(false); if (analysisChanged) setConfigVersion(v => v + 1); };
+  const persistAutomatic = (next: Settings) => {
+    const write = window.desktop.saveSettings(next, {});
+    analysisSettingsWrite.current = write;
+    return write;
+  };
   const toggleAuto = async () => {
     const next = { ...settings, autoAnalyze: !automatic };
-    const reply = await window.desktop.saveSettings(next, {});
+    const reply = await persistAutomatic(next);
     if (reply.ok) { setSettings(reply.value.settings); setKeyStatus(reply.value.keyStatus); setModelsStopped(false); }
     else notify(reply.error.message);
   };
   const stopModels = async (selected?: ModelProfile, key?: string): Promise<string> => {
     setModelsStopped(true); setModelStopping(true);
+    const paused = { ...settings, autoAnalyze: false };
+    setSettings(paused);
     coordinator.current?.configure(false, settings.debounceMs);
     if (fullRequest.current) { void window.desktop.cancel(fullRequest.current); fullRequest.current = null; }
     setFull(entry => entry ? { ...entry, requestId: undefined, state: entry.result ? 'done' : 'pending' } : null);
+    // Persist the user's pause independently of whether model unloading succeeds.
+    // Closing the app also waits for this write before exiting.
+    let persistenceWarning = '';
+    try {
+      const reply = await persistAutomatic(paused);
+      if (reply.ok) setKeyStatus(reply.value.keyStatus);
+      else persistenceWarning = `暂停状态保存失败，下次启动可能恢复自动分析：${reply.error.message}`;
+    } catch { persistenceWarning = '暂停状态保存失败，下次启动可能恢复自动分析，请重试。'; }
+    const report = (message: string) => { const result = [message, persistenceWarning].filter(Boolean).join(' '); notify(result); return result; };
     try {
       const reply = await window.desktop.stopModels(selected, key);
       const message = !reply.ok ? reply.error.message : [
@@ -247,8 +267,8 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
         '自动分析已暂停。',
         !reply.value.released.length && !reply.value.alreadyReleased.length && !reply.value.failed.length ? '非 Ollama 服务的模型内存由服务端管理。' : ''
       ].filter(Boolean).join(' ');
-      notify(message); return message;
-    } catch { const message = '请求已暂停，但无法确认模型内存已释放，请重试。'; notify(message); return message; }
+      return report(message);
+    } catch { return report('请求已暂停，但无法确认模型内存已释放，请重试。'); }
     finally { setModelStopping(false); }
   };
   const switchModel = async (id: string) => {
