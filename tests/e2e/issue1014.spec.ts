@@ -1,15 +1,14 @@
-import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import { launchIsolated } from './isolated-electron';
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { writeEditor } from './editor';
 
 let app: ElectronApplication, page: Page, userData: string;
 async function launch() {
-  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)), TWA_TEST_USER_DATA: userData };
-  delete env.ELECTRON_RUN_AS_NODE;
-  app = await electron.launch({ args: [resolve('out/main/main.js')], env }); page = await app.firstWindow();
+  app = await launchIsolated(userData); page = await app.firstWindow();
   await expect(page.getByTestId('writing-editor')).toBeVisible();
 }
 test.beforeEach(async () => { userData = await mkdtemp(join(tmpdir(), 'twa-issue1014-')); await launch(); });

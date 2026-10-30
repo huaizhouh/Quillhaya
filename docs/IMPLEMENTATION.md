@@ -1,6 +1,8 @@
 # 技术实现说明：Quillhaya - Writing Assistant
 
-最新羽毛图标与 macOS 尺寸适配见 [ICON-ADAPTATION.md](ICON-ADAPTATION.md)。
+当前独立数据目录与异步密钥存储见 [STORAGE-ISOLATION.md](STORAGE-ISOLATION.md)。
+
+羽毛图标与 macOS 尺寸适配见 [ICON-ADAPTATION.md](ICON-ADAPTATION.md)。
 这份文档描述当前源码中**已经实现**的功能与方法，用于对照代码审阅。运行方式见 [README](../README.md)，实际测试记录见 [VALIDATION](VALIDATION.md)。
 
 最新命名、图标和存储兼容性见 [issue1029 实现说明](ISSUE1029-IMPLEMENTATION.md)，打包命令与产物说明见 [PACKAGING.md](PACKAGING.md)。原生右键菜单、正文到反馈定位及每模型额外系统提示词见 [issue1022 实现说明](ISSUE1022-IMPLEMENTATION.md)。连接测试详情及外部移动文件处理见 [issue1020 实现说明](ISSUE1020-IMPLEMENTATION.md)，本轮未增加依赖。此前见 [issue1018 实现说明](ISSUE1018-IMPLEMENTATION.md)、[issue1014 实现说明](ISSUE1014-IMPLEMENTATION.md)、[issue1013 实现说明](ISSUE1013-IMPLEMENTATION.md)、[issue1012_2 实现说明](ISSUE1012-2-IMPLEMENTATION.md)、[issue1012 实现说明](ISSUE1012-IMPLEMENTATION.md)，初次四项修复保留在 [历史修复说明](FIXES-2026-10-12.md)。
@@ -270,7 +272,7 @@ IPC 来源必须同时满足：属于当前窗口 webContents、来自其主 fra
 | `clipboard:copy` | 写入推荐文本到剪贴板 |
 | `menu:command` | 仅主进程向 renderer 通知菜单操作 |
 
-普通设置写入 `settings.json`，密钥写入 `credentials.json` 的加密字符串。加密 payload 包含配置 ID 对应的目标地址、认证方式和认证 Header；读取时验证目标仍一致。删除配置同时移除其凭据。
+普通设置写入 `settings.json`，API Key 通过异步 safeStorage 加密后写入 `credentials.json`。每条凭据包含密文和非敏感的端点绑定元数据；密文内部也保存绑定，读取时必须校验一致。启动时的 keyStatus 只查看保存状态，不调用系统加解密。实际连接/分析才异步解密；删除配置同时移除其凭据。正式版和开发版采用独立数据目录及钥匙串身份。
 
 设置 UI 的新密钥输入会短暂存在密码框和 React 本地状态，随后通过写入式 IPC 交给主进程；**已保存的密钥绝不通过 bootstrap 或设置 API 回传**。系统安全存储不可用时拒绝写入，Linux `basic_text` 也不会被接受为加密存储。用户可显式指定环境变量作为开发替代。
 

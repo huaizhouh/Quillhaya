@@ -6,8 +6,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const settings = JSON.parse(await readFile(process.env.TWA_OLLAMA_SETTINGS ?? join(homedir(), 'Library/Application Support/TOEFL Writing Assistant/settings.json'), 'utf8'));
-const profile = settings.profiles.find(p => p.id === (process.env.TWA_OLLAMA_PROFILE ?? settings.defaultProfileId));
+const settings = JSON.parse(await readFile(process.env.QUILLHAYA_OLLAMA_SETTINGS ?? join(homedir(), 'Library/Application Support/Quillhaya/settings.json'), 'utf8'));
+const profile = settings.profiles.find(p => p.id === (process.env.QUILLHAYA_OLLAMA_PROFILE ?? settings.defaultProfileId));
 assert(profile?.kind === 'ollama' && profile.auth === 'none');
 assert(['localhost', '127.0.0.1', '[::1]'].includes(new URL(profile.baseUrl).hostname));
 const base = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
@@ -47,7 +47,7 @@ try {
   ];
   const started = Date.now(); console.log(`${suite} quality check: ${profile.model}, unchanged timeout ${profile.timeoutMs} ms.`);
   for (const [index, item] of cases.entries()) {
-    if (process.env.TWA_REVIEW_CASE && Number(process.env.TWA_REVIEW_CASE) !== index + 1) continue;
+    if (process.env.QUILLHAYA_REVIEW_CASE && Number(process.env.QUILLHAYA_REVIEW_CASE) !== index + 1) continue;
     const offset = payloads.length;
     const request = { request_id: crypto.randomUUID(), document_id: crypto.randomUUID(), sentence_id: `${suite}-${index}`, revision_id: index,
       original_text: item.text, from: 0, to: item.text.length, mode: 'email', scope: 'sentence', profile_id: profile.id, context: { before: item.before, after: item.after, task: '' } };
@@ -56,7 +56,7 @@ try {
     console.log(JSON.stringify({ case: index + 1, httpRequests: payloads.length - offset, context: request.context, result }));
     item.verify(result);
   }
-  console.log(`PASS: ${process.env.TWA_REVIEW_CASE ? 'selected example' : `${cases.length} fixed examples`}; actual payload context verified; elapsed ${Date.now() - started} ms.`);
+  console.log(`PASS: ${process.env.QUILLHAYA_REVIEW_CASE ? 'selected example' : `${cases.length} fixed examples`}; actual payload context verified; elapsed ${Date.now() - started} ms.`);
 } finally {
   try { if (provider) await provider.release(); }
   finally { await rm(directory, { recursive: true, force: true }); }

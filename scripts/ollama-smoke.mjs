@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const settingsPath = process.env.TWA_OLLAMA_SETTINGS ?? join(homedir(), 'Library/Application Support/TOEFL Writing Assistant/settings.json');
+const settingsPath = process.env.QUILLHAYA_OLLAMA_SETTINGS ?? join(homedir(), 'Library/Application Support/Quillhaya/settings.json');
 const settings = JSON.parse(await readFile(settingsPath, 'utf8'));
 const profile = settings.profiles.find(p => p.id === settings.defaultProfileId);
 assert(profile?.kind === 'ollama' && profile.auth === 'none', 'Select an unauthenticated local Ollama profile first.');

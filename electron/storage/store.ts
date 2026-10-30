@@ -7,12 +7,17 @@ import { AppError } from '../llm/errors';
 
 const DraftSchema = z.object({ document: DocumentSchema, path: z.string().nullable(), savedText: z.string(), savedAt: z.string() });
 type Draft = z.infer<typeof DraftSchema>;
-const VaultSchema = z.record(z.string());
+const BindingSchema = z.object({ endpoint: z.string(), auth: z.enum(['none', 'bearer', 'header']), header: z.string() });
+const SecretSchema = BindingSchema.extend({ key: z.string().min(1).max(8000) });
+const VaultSchema = z.record(BindingSchema.extend({ ciphertext: z.string().min(1) }));
+function matches(binding: z.infer<typeof BindingSchema>, profile: ModelProfile) {
+  return binding.endpoint === profile.baseUrl && binding.auth === profile.auth && binding.header === profile.authHeader;
+}
 
 export class LocalStore {
   settings: Settings = structuredClone(defaultSettings);
   notice?: string;
-  private vault: Record<string, string> = {};
+  private vault: z.infer<typeof VaultSchema> = {};
   private writes: Promise<unknown> = Promise.resolve();
   constructor(readonly directory: string) {}
   async init() {
@@ -44,34 +49,47 @@ export class LocalStore {
   saveDraft(document: WritingDocument, path: string | null, savedText: string) {
     return this.atomic('draft.json', { document, path, savedText, savedAt: new Date().toISOString() });
   }
-  private encryptionAvailable() {
-    return safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text');
+  private async encryptionAvailable() {
+    return await safeStorage.isAsyncEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text');
   }
-  key(profile: ModelProfile): string | undefined {
-    const encrypted = this.vault[profile.id];
-    if (encrypted && this.encryptionAvailable()) {
+  async key(profile: ModelProfile): Promise<string | undefined> {
+    const saved = this.vault[profile.id];
+    if (saved && matches(saved, profile)) {
       try {
-        const value = JSON.parse(safeStorage.decryptString(Buffer.from(encrypted, 'base64')));
-        // An existing credential is never silently reused at a changed destination.
-        if (value.endpoint === profile.baseUrl && value.auth === profile.auth && value.header === profile.authHeader) return value.key;
-      } catch { /* Locked/unavailable Keychain: use explicitly selected environment variable. */ }
+        const { result } = await safeStorage.decryptStringAsync(Buffer.from(saved.ciphertext, 'base64'));
+        const value = SecretSchema.parse(JSON.parse(result));
+        // Check the encrypted binding too; public metadata must never authorize
+        // sending a saved key to a different endpoint or authentication header.
+        if (matches(value, profile)) return value.key;
+      } catch { /* Unavailable Keychain: use only an explicitly configured environment variable. */ }
     }
     return profile.envKey ? process.env[profile.envKey] || undefined : undefined;
   }
-  keyStatus() { return Object.fromEntries(this.settings.profiles.map(p => [p.id, Boolean(this.key(p))])); }
+  keyStatus() {
+    // Bootstrap and settings display must not decrypt or touch the Keychain.
+    // This indicates a saved credential, not a successful connection test.
+    return Object.fromEntries(this.settings.profiles.map(p => [p.id,
+      Boolean((this.vault[p.id] && matches(this.vault[p.id], p)) || (p.envKey && process.env[p.envKey]))]));
+  }
   async saveSettings(settings: Settings, keys: Record<string, string | null>) {
     const nextVault = { ...this.vault };
     for (const [id, key] of Object.entries(keys)) {
       const profile = settings.profiles.find(p => p.id === id);
       if (!profile) throw new AppError('settings', '密钥对应的模型配置不存在。');
       if (key === null) { delete nextVault[id]; continue; }
-      if (!this.encryptionAvailable()) throw new AppError('keychain', '系统安全存储不可用，未保存密钥。请解锁 Keychain 或使用环境变量。');
-      nextVault[id] = safeStorage.encryptString(JSON.stringify({ endpoint: profile.baseUrl, auth: profile.auth, header: profile.authHeader, key })).toString('base64');
+      try {
+        if (!await this.encryptionAvailable()) throw new Error('Secure storage unavailable');
+        const binding = { endpoint: profile.baseUrl, auth: profile.auth, header: profile.authHeader };
+        const ciphertext = (await safeStorage.encryptStringAsync(JSON.stringify({ ...binding, key }))).toString('base64');
+        nextVault[id] = { ...binding, ciphertext };
+      } catch {
+        throw new AppError('keychain', '无法保存密钥：Quillhaya 的系统安全存储不可用。请解锁钥匙串后重试，或使用环境变量。');
+      }
     }
     for (const id of Object.keys(nextVault)) if (!settings.profiles.some(p => p.id === id)) delete nextVault[id];
     await this.atomic('credentials.json', nextVault);
-    this.vault = nextVault;
     await this.atomic('settings.json', settings);
+    this.vault = nextVault;
     this.settings = settings;
   }
 }

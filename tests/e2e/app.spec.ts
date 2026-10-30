@@ -1,4 +1,5 @@
-import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import { launchIsolated } from './isolated-electron';
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { mkdtemp, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -9,9 +10,7 @@ let app: ElectronApplication;
 let page: Page;
 let userData: string;
 async function launch(directory: string) {
-  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)), TWA_TEST_USER_DATA: directory };
-  delete env.ELECTRON_RUN_AS_NODE;
-  app = await electron.launch({ args: [resolve('out/main/main.js')], env });
+  app = await launchIsolated(directory);
   page = await app.firstWindow();
   await expect(page.getByTestId('writing-editor')).toBeVisible();
 }
@@ -32,7 +31,7 @@ test('real sandboxed Electron window, native menus and isolated API', async () =
     return { name: main.getName(), menuName: menu?.items[0].label, isolation: preferences.contextIsolation, sandbox: preferences.sandbox, node: preferences.nodeIntegration,
       fileMenu: menu?.items.find(i => i.label === '文件')?.submenu?.items.map(i => ({ label: i.label, accelerator: i.accelerator })) };
   });
-  expect(security).toMatchObject({ name: 'Quillhaya', menuName: 'Quillhaya', isolation: true, sandbox: true, node: false });
+  expect(security).toMatchObject({ name: 'Quillhaya Development', menuName: 'Quillhaya Development', isolation: true, sandbox: true, node: false });
   await expect(page).toHaveTitle('Quillhaya - Writing Assistant');
   await expect(page.locator('.app-brand')).toHaveText('Quillhaya - Writing Assistant');
   await expect(page.locator('.app-brand img')).toHaveCount(0);
@@ -264,13 +263,13 @@ test('native quit can be cancelled and then closes after preserving the latest d
   expect(draft.document.text).toBe('My latest unsaved sentence.');
 });
 
-test('real macOS safeStorage round trip is encrypted and never exposed by bootstrap', async () => {
-  const encrypted = await app.evaluate(({ safeStorage }) => {
-    const available = safeStorage.isEncryptionAvailable();
+test('asynchronous safeStorage round trip is encrypted and never exposed by bootstrap', async () => {
+  const encrypted = await app.evaluate(async ({ safeStorage }) => {
+    const available = await safeStorage.isAsyncEncryptionAvailable();
     if (!available) return { available, roundTrip: false, encrypted: false };
     const value = 'synthetic-storage-validation';
-    const ciphertext = safeStorage.encryptString(value);
-    return { available, roundTrip: safeStorage.decryptString(ciphertext) === value, encrypted: !ciphertext.includes(Buffer.from(value)) };
+    const ciphertext = await safeStorage.encryptStringAsync(value);
+    return { available, roundTrip: (await safeStorage.decryptStringAsync(ciphertext)).result === value, encrypted: !ciphertext.includes(Buffer.from(value)) };
   });
   expect(encrypted).toEqual({ available: true, roundTrip: true, encrypted: true });
   const bootstrap = await page.evaluate(() => window.desktop.bootstrap());
@@ -462,26 +461,25 @@ test('issue1012: stop cancels active and queued inference, unloads and prevents 
 });
 
 
-test('issue1029: renamed app decrypts the previous app namespace without migrating credentials', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'quillhaya-legacy-'));
-  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)), TWA_TEST_USER_DATA: directory };
-  delete env.ELECTRON_RUN_AS_NODE;
-  const legacy = await electron.launch({ args: [resolve('tests/fixtures/legacy-storage.cjs')], env });
-  try {
-    const ciphertext = await legacy.evaluate(async ({ app: main, safeStorage }) => {
-      await main.whenReady();
-      return safeStorage.encryptString('synthetic-issue1029-credential').toString('base64');
-    });
-    const readable = await app.evaluate(({ app: main, safeStorage }, ciphertext) => {
-      // This isolated process has not used safeStorage yet. Match the native
-      // Keychain used by the legacy fixture and production bundles.
-      main.commandLine.removeSwitch('use-mock-keychain');
-      main.commandLine.removeSwitch('password-store');
-      return { name: main.getName(), value: safeStorage.decryptString(Buffer.from(ciphertext, 'base64')) };
-    }, ciphertext);
-    expect(readable).toEqual({ name: 'Quillhaya', value: 'synthetic-issue1029-credential' });
-  } finally {
-    const closed = legacy.waitForEvent('close'); await legacy.evaluate(({ app: main }) => main.exit(0)); await closed;
-    await (await import('node:fs/promises')).rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  }
+test('saved Quillhaya credentials survive restart without decryption during bootstrap', async () => {
+  const key = 'synthetic-quillhaya-restart';
+  const saved = await page.evaluate(async key => {
+    const boot = await window.desktop.bootstrap(); if (!boot.ok) throw Error('bootstrap');
+    const profile = { ...boot.value.settings.profiles[0], id: 'credential-test', kind: 'custom' as const,
+      name: 'Restart verification', auth: 'bearer' as const, baseUrl: 'http://127.0.0.1:1/v1', model: 'test', envKey: '' };
+    return window.desktop.saveSettings({ ...boot.value.settings, profiles: [profile], defaultProfileId: profile.id, autoAnalyze: false }, { [profile.id]: key });
+  }, key);
+  expect(saved.ok && saved.value.keyStatus['credential-test']).toBe(true);
+  expect(await readFile(join(userData, 'credentials.json'), 'utf8')).not.toContain(key);
+  const closed = app.waitForEvent('close'); await app.evaluate(({ app: main }) => main.exit(0)); await closed;
+  await launch(userData);
+  await app.evaluate(({ safeStorage }) => {
+    safeStorage.decryptStringAsync = async () => { throw new Error('Bootstrap must not decrypt'); };
+    safeStorage.isAsyncEncryptionAvailable = async () => { throw new Error('Bootstrap must not initialize encryption'); };
+  });
+  const boot = await page.evaluate(() => window.desktop.bootstrap());
+  expect(boot.ok && boot.value.keyStatus['credential-test']).toBe(true);
+  expect(JSON.stringify(boot)).not.toContain(key);
+  await page.getByRole('button', { name: '打开设置' }).click();
+  await expect(page.locator('.field-hint').filter({ hasText: '已保存密钥' })).toBeVisible();
 });

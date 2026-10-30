@@ -5,17 +5,18 @@ import { join } from 'node:path';
 import { defaultSettings, makeProfile, ProfileSchema, type WritingDocument } from '../../src/models/schema';
 
 const electron = vi.hoisted(() => ({
-  safeStorage: { isEncryptionAvailable: vi.fn(() => true), getSelectedStorageBackend: vi.fn(() => 'keychain'), encryptString: vi.fn((text: string) => Buffer.from(Buffer.from(text).map(b => b ^ 42))), decryptString: vi.fn((value: Buffer) => Buffer.from(Buffer.from(value).map(b => b ^ 42)).toString('utf8')) },
+  safeStorage: { isAsyncEncryptionAvailable: vi.fn(async () => true), getSelectedStorageBackend: vi.fn(() => 'keychain'), encryptStringAsync: vi.fn(async (text: string) => Buffer.from(Buffer.from(text).map(b => b ^ 42))), decryptStringAsync: vi.fn(async (value: Buffer) => ({ result: Buffer.from(Buffer.from(value).map(b => b ^ 42)).toString('utf8'), shouldReEncrypt: false })) },
   dialog: { showOpenDialog: vi.fn(), showSaveDialog: vi.fn(), showMessageBox: vi.fn() }
 }));
 vi.mock('electron', () => electron);
 import { LocalStore } from '../../electron/storage/store';
 import { Documents } from '../../electron/storage/documents';
+import { storageIdentity } from '../../electron/storage/identity';
 
 describe('document and settings persistence', () => {
   let directory: string;
   let store: LocalStore;
-  beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'twa-unit-')); store = new LocalStore(directory); await store.init(); electron.safeStorage.isEncryptionAvailable.mockReturnValue(true); });
+  beforeEach(async () => { vi.resetAllMocks(); directory = await mkdtemp(join(tmpdir(), 'twa-unit-')); store = new LocalStore(directory); await store.init(); electron.safeStorage.isAsyncEncryptionAvailable.mockResolvedValue(true); });
   afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
   it('encrypts credentials, returns only key presence, and binds a key to the destination', async () => {
     const profile = makeProfile('custom', 'custom'); const settings = { ...defaultSettings, profiles: [profile], defaultProfileId: profile.id };
@@ -23,15 +24,61 @@ describe('document and settings persistence', () => {
     expect(await readFile(join(directory, 'credentials.json'), 'utf8')).not.toContain('synthetic-unit-test-credential');
     expect(await readFile(join(directory, 'settings.json'), 'utf8')).not.toContain('synthetic-unit-test-credential');
     expect(store.keyStatus()).toEqual({ custom: true });
-    expect(store.key(profile)).toBe('synthetic-unit-test-credential');
-    expect(store.key({ ...profile, baseUrl: 'https://other.example/v1' })).toBeUndefined();
-    const restarted = new LocalStore(directory); await restarted.init(); expect(restarted.key(profile)).toBe('synthetic-unit-test-credential');
+    expect(await store.key(profile)).toBe('synthetic-unit-test-credential');
+    expect(await store.key({ ...profile, baseUrl: 'https://other.example/v1' })).toBeUndefined();
+    const restarted = new LocalStore(directory); await restarted.init(); expect(await restarted.key(profile)).toBe('synthetic-unit-test-credential');
     await restarted.saveSettings(settings, { custom: null }); expect(restarted.keyStatus()).toEqual({ custom: false });
   });
   it('never falls back to plaintext when secure storage is unavailable', async () => {
-    electron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+    electron.safeStorage.isAsyncEncryptionAvailable.mockResolvedValue(false);
     await expect(store.saveSettings(defaultSettings, { mock: 'synthetic-key' })).rejects.toMatchObject({ code: 'keychain' });
     await expect(readFile(join(directory, 'credentials.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('isolates packaged and development identities and permits only an explicit test override', () => {
+    expect(storageIdentity(true, '/app-data')).toEqual({ name: 'Quillhaya', directory: '/app-data/Quillhaya' });
+    expect(storageIdentity(false, '/app-data')).toEqual({ name: 'Quillhaya Development', directory: '/app-data/Quillhaya Development' });
+    expect(storageIdentity(true, '/app-data', '/isolated')).toEqual({ name: 'Quillhaya', directory: '/isolated' });
+  });
+  it('reports saved keys after restart without calling any system encryption API', async () => {
+    const profile = makeProfile('custom');
+    const settings = { ...defaultSettings, defaultProfileId: profile.id, profiles: [profile] };
+    await store.saveSettings(settings, { custom: 'synthetic-no-startup-prompt' });
+    vi.clearAllMocks();
+    const restarted = new LocalStore(directory); await restarted.init();
+    expect(restarted.keyStatus()).toEqual({ custom: true });
+    expect(electron.safeStorage.isAsyncEncryptionAvailable).not.toHaveBeenCalled();
+    expect(electron.safeStorage.encryptStringAsync).not.toHaveBeenCalled();
+    expect(electron.safeStorage.decryptStringAsync).not.toHaveBeenCalled();
+    restarted.settings = { ...settings, profiles: [{ ...profile, baseUrl: 'https://different.example/v1' }] };
+    expect(restarted.keyStatus()).toEqual({ custom: false });
+  });
+  it('checks encrypted endpoint binding even if public vault metadata is changed', async () => {
+    const profile = makeProfile('custom');
+    await store.saveSettings({ ...defaultSettings, profiles: [profile], defaultProfileId: profile.id }, { custom: 'synthetic-bound-key' });
+    const path = join(directory, 'credentials.json'); const vault = JSON.parse(await readFile(path, 'utf8'));
+    vault.custom.endpoint = 'https://different.example/v1'; await writeFile(path, JSON.stringify(vault));
+    const restarted = new LocalStore(directory); await restarted.init();
+    expect(await restarted.key({ ...profile, baseUrl: vault.custom.endpoint })).toBeUndefined();
+  });
+  it('does not replace saved credentials or settings when asynchronous encryption fails', async () => {
+    const profile = makeProfile('custom'); const settings = { ...defaultSettings, profiles: [profile], defaultProfileId: profile.id };
+    await store.saveSettings(settings, { custom: 'synthetic-original' });
+    const before = await readFile(join(directory, 'credentials.json'), 'utf8');
+    electron.safeStorage.encryptStringAsync.mockRejectedValueOnce(new Error('Permission denied'));
+    await expect(store.saveSettings({ ...settings, fontSize: 22 }, { custom: 'synthetic-new' })).rejects.toMatchObject({ code: 'keychain' });
+    expect(await readFile(join(directory, 'credentials.json'), 'utf8')).toBe(before);
+    expect(store.settings.fontSize).toBe(settings.fontSize);
+    expect(await store.key(profile)).toBe('synthetic-original');
+  });
+  it('does not decrypt during bootstrap even if the system store is unavailable', async () => {
+    const profile = makeProfile('custom');
+    await store.saveSettings({ ...defaultSettings, profiles: [profile], defaultProfileId: profile.id }, { custom: 'synthetic-saved-key' });
+    electron.safeStorage.decryptStringAsync.mockRejectedValue(new Error('Keychain locked'));
+    const restarted = new LocalStore(directory); await restarted.init();
+    expect(restarted.keyStatus()).toEqual({ custom: true });
+    expect(electron.safeStorage.decryptStringAsync).not.toHaveBeenCalled();
+    expect(await restarted.key(profile)).toBeUndefined();
+    expect(electron.safeStorage.decryptStringAsync).toHaveBeenCalledTimes(1);
   });
   it('serializes drafts atomically and restores the latest one without changing source files', async () => {
     const doc: WritingDocument = { id: crypto.randomUUID(), name: 'draft.md', text: 'First.', task: 'Task', mode: 'email', dirty: true };

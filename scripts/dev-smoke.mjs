@@ -11,7 +11,7 @@ const portServer = createServer();
 portServer.listen(0, '127.0.0.1'); await once(portServer, 'listening');
 const port = portServer.address().port; await new Promise(resolve => portServer.close(resolve));
 const directory = await mkdtemp(join(tmpdir(), 'twa-dev-smoke-'));
-const child = spawn('bash', ['run.sh'], { detached: true, env: { ...process.env, TWA_TEST_USER_DATA: directory, REMOTE_DEBUGGING_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawn('bash', ['run.sh'], { detached: true, env: { ...process.env, QUILLHAYA_TEST_USER_DATA: directory, REMOTE_DEBUGGING_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
 let output = '';
 child.stdout.on('data', chunk => { output = (output + chunk).slice(-15_000); });
 child.stderr.on('data', chunk => { output = (output + chunk).slice(-15_000); });

@@ -31,7 +31,7 @@ CodeMirror、模型调用、结构化返回校验及反馈调度沿用现有实�
 
 ## 名称和资源如何生效
 
-1. `package.json` 与 `package-lock.json` 的包名同步为 `quillhaya`；`build.productName` 设置为 `Quillhaya`，生成 `Quillhaya.app` 和对应 DMG。保留已有 Bundle ID，避免把改名当作另一份应用身份。
+1. `package.json` 与 `package-lock.json` 的包名同步为 `quillhaya`；`build.productName` 设置为 `Quillhaya`，生成 `Quillhaya.app` 和对应 DMG。1.0.0 当时保留原 Bundle ID；1.0.1 按独立存储要求改为 `com.zloyan.quillhaya`。
 2. `build.mac.icon` 指向现有 ICNS。打包验证从 Info.plist 读取实际图标文件，再与源文件比较字节。
 3. `App.tsx` 导入 PNG，由 Vite 复制为带哈希的静态资源；生产包可离线显示，不依赖源码目录或外部图片地址。
 4. 源码开发模式在 ready 后设置 Dock 图标；打包版本使用系统读取的 ICNS，无需依赖工程内的 PNG 路径。
@@ -39,7 +39,9 @@ CodeMirror、模型调用、结构化返回校验及反馈调度沿用现有实�
 
 代码入口：[package.json](../package.json)、[main.ts](../electron/main.ts)、[App.tsx](../src/App.tsx)、[index.html](../index.html)、[context-menu.ts](../electron/context-menu.ts)、[package-smoke.mjs](../scripts/package-smoke.mjs)。
 
-## 存储兼容性
+## 存储兼容性（历史方案，1.0.1 已撤销）
+
+**以下兼容方案已按用户要求撤销。当前实现不再读取旧目录或旧钥匙串，详见 [STORAGE-ISOLATION.md](STORAGE-ISOLATION.md)。**
 
 沿用原有用户目录 `~/Library/Application Support/TOEFL Writing Assistant/`，不迁移、复制或删除用户文件。已有 `settings.json`、`credentials.json` 和 `draft.json` 继续读取；测试目录覆盖变量也保持不变。
 
@@ -49,7 +51,7 @@ CodeMirror、模型调用、结构化返回校验及反馈调度沿用现有实�
 
 增加 `tests/fixtures/legacy-storage.cjs` 复现旧命名空间，仅接受隔离测试目录；用旧名称进程加密合成字符串，再分别用新源码应用和新打包应用解密。Playwright 会给源码启动注入 `use-mock-keychain`，因此兼容用例在首次加解密前移除相关模拟开关，打包冒烟另断言该开关不存在，确保验证真实系统钥匙串。
 
-本次还将上一版 `Writing Assistant-1.0.0-arm64.dmg` 只读挂载，用其中的实际旧应用加密合成字符串，再由新 `Quillhaya.app` 成功解密。macOS 对新应用的钥匙串访问弹窗由用户手动允许，测试没有修改系统访问控制。此验证应在后续升级 Electron 时继续运行，因为它依赖该版本的初始化顺序。
+本次还将上一版 `Writing Assistant-1.0.0-arm64.dmg` 只读挂载，用其中的实际旧应用加密合成字符串，再由新 `Quillhaya.app` 成功解密。macOS 对新应用的钥匙串访问弹窗由用户手动允许，测试没有修改系统访问控制。这项旧兼容验证现已移除；1.0.1 改为验证新应用独立保存及重启读取。
 
 ## 文档与项目迁移
 

@@ -28,12 +28,12 @@ npx --no electron-builder --mac --arm64 --publish never
 | npm 包名 | `quillhaya` |
 | 正式应用名 / `productName` | `Quillhaya` |
 | 主窗口标题及左上角文字 | `Quillhaya - Writing Assistant` |
-| Bundle ID | `com.zloyan.writingassistant`，保留已有身份 |
+| Bundle ID | `com.zloyan.quillhaya`，Quillhaya 独立应用身份 |
 | 架构 / 用途分类 | `arm64` / `public.app-category.productivity` |
 | macOS 应用图标 | `icon/generated/app-icon.icns` |
 | 启动页、源码运行 Dock 图标 | `icon/generated/app-icon.png` |
 | 应用 | `dist/mac-arm64/Quillhaya.app` |
-| 安装镜像 | `dist/Quillhaya-1.0.0-arm64.dmg`（版本号跟随 package.json） |
+| 安装镜像 | `dist/Quillhaya-1.0.1-arm64.dmg`（版本号跟随 package.json） |
 
 `icon/icon.png` 是用户提供的羽毛原图，保持原样。`npm run dev` 和 `npm run build` 会自动执行 `npm run icons`：使用系统 Swift / CoreGraphics 裁去多余白边，生成圆角底板和透明边距，并通过 `iconutil` 导出 ICNS；`pack:mac` 和 `dist:mac` 因调用 build 也会自动更新图标。
 
@@ -45,14 +45,16 @@ Renderer 通过 Vite 导入 PNG，生成带内容哈希的本地资源并装入�
 
 ## 数据兼容与检查
 
-Bundle ID、用户数据位置及旧 Keychain 命名空间保持稳定。主进程在 Electron 初始化密钥存储之后设置可见应用名，避免直接改名导致旧 API Key 密文无法解密。具体实现见 [ISSUE1029-IMPLEMENTATION.md](ISSUE1029-IMPLEMENTATION.md#存储兼容性)。
+1.0.1 起使用独立 Bundle ID、`Quillhaya/` 用户目录及 `Quillhaya Safe Storage` 钥匙串命名空间。开发模式单独使用 `Quillhaya Development`。不自动迁移、读取或解密旧应用数据，首次使用需重新配置。实现见 [STORAGE-ISOLATION.md](STORAGE-ISOLATION.md)。
 
 `test:package` 使用隔离目录验证：
 
-- Info.plist 的应用名、可执行文件名、Bundle ID、架构和用途分类。
-- 打包 ICNS 与本次生成的 ICNS 字节一致，确保没有回退到 Electron 默认图标。
-- 主窗口名称、左上角纯文字品牌、沙箱和本地页面正常。
-- 使用旧命名空间加密的合成字符串，在 Quillhaya 打包应用中仍可解密。
-- Mock 反馈、忽略、重新评估、接受修改仍可用。
+- Info.plist 的 Quillhaya 应用身份、可执行文件名、架构及用途分类。
+- 打包 ICNS 与生成文件字节一致，主窗口左上角只显示文字。
+- 首次启动使用默认 Mock，写作反馈、忽略、重评和接受修改正常。
+- 通过真实系统钥匙串加密保存合成 API Key，磁盘及 bootstrap 不含明文密钥。
+- 退出后把同一签名的 `.app` 复制到另一个临时安装位置，再次启动；已保存状态和草稿恢复，使用保存的密钥访问本地 HTTP 测试服务成功。
 
-兼容测试使用真实 macOS 钥匙串加解密合成字符串，显式排除 Playwright 模拟钥匙串；系统若弹出访问授权，需要由用户在系统弹窗处理。测试不读取用户真实 API Key 或作文。历史 `Writing Assistant` 名称的 DMG 可能仍在输出目录中；本次新产物以 `Quillhaya` 为名，以本页路径为准。
+测试不再启动旧名称程序或验证旧密文兼容。密钥检查使用系统接口及合成测试字符串，不读取用户真实 API Key；不更改用户的实际数据目录。
+
+同一个已保存密钥的构建正常重启，无需重复授权。跨版本更新若继续采用 ad-hoc 签名，系统可能将新的构建识别为不同程序并要求授权；稳定的跨版本身份需要发布者提供正式签名证书。应用不会通过放宽钥匙串访问控制或明文保存来绕过系统保护。详情见 [Electron 44.7.0 safeStorage 文档](https://github.com/electron/electron/blob/v44.7.0/docs/api/safe-storage.md)。

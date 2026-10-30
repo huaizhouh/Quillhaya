@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const settings = JSON.parse(await readFile(process.env.TWA_OLLAMA_SETTINGS ?? join(homedir(), 'Library/Application Support/TOEFL Writing Assistant/settings.json'), 'utf8'));
-const profile = settings.profiles.find(p => p.id === (process.env.TWA_OLLAMA_PROFILE ?? settings.defaultProfileId));
+const settings = JSON.parse(await readFile(process.env.QUILLHAYA_OLLAMA_SETTINGS ?? join(homedir(), 'Library/Application Support/Quillhaya/settings.json'), 'utf8'));
+const profile = settings.profiles.find(p => p.id === (process.env.QUILLHAYA_OLLAMA_PROFILE ?? settings.defaultProfileId));
 assert(profile?.kind === 'ollama' && profile.auth === 'none', 'A local unauthenticated Ollama profile is required.');
 assert(['localhost', '127.0.0.1', '[::1]'].includes(new URL(profile.baseUrl).hostname), 'Only loopback Ollama endpoints are allowed.');
 const base = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
@@ -22,12 +22,12 @@ const directory = await mkdtemp(join(tmpdir(), 'twa-ollama-close-'));
 let app, closed = false;
 try {
   await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...settings, profiles: [profile], defaultProfileId: profile.id, autoAnalyze: false }));
-  const env = { ...process.env, TWA_TEST_USER_DATA: directory }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, QUILLHAYA_TEST_USER_DATA: directory }; delete env.ELECTRON_RUN_AS_NODE;
   app = await electron.launch({ args: [join(root, 'out/main/main.js')], env });
   const page = await app.firstWindow(); await page.getByTestId('writing-editor').waitFor();
   // Optional historical ID: require it to be absent, then exercise the real IPC fallback.
-  if (process.env.TWA_OLLAMA_OLD_MODEL) {
-    const oldModel = process.env.TWA_OLLAMA_OLD_MODEL;
+  if (process.env.QUILLHAYA_OLLAMA_OLD_MODEL) {
+    const oldModel = process.env.QUILLHAYA_OLLAMA_OLD_MODEL;
     assert.equal(await resident(oldModel), false);
     const result = await page.evaluate(({ profile, oldModel }) => window.desktop.stopModels({ ...profile, model: oldModel }), { profile, oldModel });
     assert(result.ok); assert.deepEqual(result.value.failed, []); assert(result.value.alreadyReleased.includes(oldModel));

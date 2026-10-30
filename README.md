@@ -71,7 +71,7 @@ Temperature 留空时不发送该参数。附加 Headers 仅用于非密钥信�
 
 - LLM 请求只在 Electron **主进程**发出。renderer 无 Node、文件系统、Keychain 和通用 IPC 权限。
 - 新输入的密钥仅经一次写入式 IPC 送往主进程；保存后不会回传。设置页只能看到“是否已配置”，不会读取已保存密钥。输入框关闭后销毁。
-- 使用 Electron `safeStorage` 加密凭据；macOS 的加密密钥由 Keychain 保护。JSON 中只有密文。安全存储不可用时拒绝保存，不退回明文。
+- 使用 Electron 异步 `safeStorage` 加密凭据，macOS 的加密密钥由 Quillhaya 独立的 Keychain 条目保护。API Key 只以密文保存；安全存储不可用时拒绝保存，不退回明文。启动和打开设置不会为检查保存状态而解密密钥。
 - 密钥绑定配置 ID、Base URL 和认证方式，修改端点后需重新输入；防止旧密钥无意发送到新地址。环境变量由用户显式选择，会用于该配置指定的端点。
 - 开发时可以在启动前 `export OPENAI_API_KEY`、`export OPENROUTER_API_KEY`，或者在配置中填写自定义环境变量名称。`.env.example` 只有空值；应用不自动加载 `.env`。
 - 默认发送当前句子、最多前两句和后一句完整上下文，以及选填题目；不发送本地文件路径、文档标识或系统信息。“分析全文”是主动操作，会发送全文并仅返回结构和任务回应等建议，不生成全文替换。
@@ -104,12 +104,12 @@ Temperature 留空时不发送该参数。附加 Headers 仅用于非密钥信�
 
 正常关闭窗口或按 ⌘Q，会先完成保存确认及草稿写入，取消请求并等待本应用使用过的 Ollama 模型卸载，再关闭。若实际清理失败，可重试、返回写作或选择仍然关闭。已删除的旧模型 ID 返回 404 时，会通过 `/api/ps` 核验是否已不驻留，避免误报。
 
-应用数据保存在 macOS 用户的 Application Support 目录。升级后沿用已有数据位置，保留模型配置、密钥和草稿；具体兼容策略见 [本次实现说明](docs/ISSUE1029-IMPLEMENTATION.md#存储兼容性)。
+安装版使用 macOS 用户 Application Support 下的 `Quillhaya/`；源码开发版使用独立的 `Quillhaya Development/`，两者的配置、草稿与密钥互不共享。1.0.1 起不自动读取或迁移旧版数据，首次使用需重新添加模型和 API Key。具体策略见 [独立存储说明](docs/STORAGE-ISOLATION.md)。
 
 | 文件 | 内容 |
 | --- | --- |
 | `settings.json` | 非密钥设置 |
-| `credentials.json` | 系统加密后的密钥密文 |
+| `credentials.json` | 系统加密后的密钥密文及非敏感的端点绑定信息 |
 | `draft.json` | 最新本地草稿、原文件关联和已保存版本 |
 
 草稿包含正文和题目，属于本地未加密数据，请按作文隐私需求保护自己的系统账户与磁盘。不要将整个数据目录提交到 Git。
@@ -184,15 +184,15 @@ npm run test:dev
 npm audit
 ```
 
-E2E 使用下载的 Electron 自身，不需要另外下载 Playwright Chromium。测试使用临时 `TWA_TEST_USER_DATA`，不触碰你的真实文档；原生文件对话框在文件测试中替换为临时路径，实际文件读写、IPC、Electron、CodeMirror 与菜单仍是真实实现。HTTP 集成测试运行临时本地兼容服务，不消费外部 API 配额。开发冒烟测试会运行 `bash run.sh`，随后自动关闭其启动的进程。
+E2E 使用下载的 Electron 自身，不需要另外下载 Playwright Chromium。测试使用临时 `QUILLHAYA_TEST_USER_DATA`，不触碰你的真实文档；原生文件对话框在文件测试中替换为临时路径，实际文件读写、IPC、Electron、CodeMirror 与菜单仍是真实实现。HTTP 集成测试运行临时本地兼容服务，不消费外部 API 配额。开发冒烟测试会运行 `bash run.sh`，随后自动关闭其启动的进程。
 
 实际执行结果和测试环境见 [验收记录](docs/VALIDATION.md)。
 
-已配置并运行本地 Ollama 时，可选执行 `npm run test:ollama`，以四个固定句子验证中文结构化反馈与串行排队；或执行 `npm run test:ollama:lifecycle`，验证连接测试后卸载、再次加载后主动停止，并通过 `/api/ps` 检查是否仍驻留。后者可用 `TWA_OLLAMA_PROFILE=<已保存配置的 ID>` 选择配置。两者只读取模型设置，限本机无认证端点，不读取作文、凭据或修改设置，结束时会尝试释放测试模型。
+已配置并运行本地 Ollama 时，可选执行 `npm run test:ollama`，以四个固定句子验证中文结构化反馈与串行排队；或执行 `npm run test:ollama:lifecycle`，验证连接测试后卸载、再次加载后主动停止，并通过 `/api/ps` 检查是否仍驻留。后者可用 `QUILLHAYA_OLLAMA_PROFILE=<已保存配置的 ID>` 选择配置。两者只读取模型设置，限本机无认证端点，不读取作文、凭据或修改设置，结束时会尝试释放测试模型。
 
-可选执行 `npm run test:ollama:close`，通过隔离的真实 Electron 会话验证退出卸载；支持 `TWA_OLLAMA_PROFILE` 选择配置、`TWA_OLLAMA_OLD_MODEL` 验证已不驻留的旧 ID，不修改真实设置。
+可选执行 `npm run test:ollama:close`，通过隔离的真实 Electron 会话验证退出卸载；支持 `QUILLHAYA_OLLAMA_PROFILE` 选择配置、`QUILLHAYA_OLLAMA_OLD_MODEL` 验证已不驻留的旧 ID，不修改真实设置。
 
-可选执行 `npm run test:ollama:review`，以四个固定示例检查 however 的上下文、主谓一致分类和邮件开头；支持 `TWA_OLLAMA_PROFILE`。它只读取本机无认证 Ollama 的模型设置，不修改实际配置；若测试模型已经驻留则拒绝运行，结束时尝试卸载自己加载的模型。
+可选执行 `npm run test:ollama:review`，以四个固定示例检查 however 的上下文、主谓一致分类和邮件开头；支持 `QUILLHAYA_OLLAMA_PROFILE`。它只读取本机无认证 Ollama 的模型设置，不修改实际配置；若测试模型已经驻留则拒绝运行，结束时尝试卸载自己加载的模型。
 
 可选执行 `npm run test:ollama:balance`，检查 issue1014 的语法误报、可选优化保留及混合建议，沿用同样的本机配置与测试模型释放规则。
 

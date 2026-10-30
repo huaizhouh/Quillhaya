@@ -1,8 +1,35 @@
 # 实际验收记录
 
-最新验证日期：2026-10-29。以下区分本次修复复验与初版历史记录，只记录实际执行的检查。
+最新验证日期：2026-10-30。以下区分本次修复复验与初版历史记录，只记录实际执行的检查。
 
-## 2026-10-29 移除主界面标题旁图标（最新微调）
+## 2026-10-30 Quillhaya 1.0.1 独立存储与重启验证
+
+本次工作从 10 月 29 日晚持续到 10 月 30 日。用户要求取消旧应用名的存储兼容。安装版使用 `Quillhaya`，开发版使用 `Quillhaya Development`；数据目录和 macOS 加密身份分别独立。技术栈、文件格式、调用时机和系统授权边界见 [STORAGE-ISOLATION.md](STORAGE-ISOLATION.md)。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| `npm run check` | 类型检查、**10 个文件 / 120 项单元测试**及生产构建通过 |
+| `playwright test` | **46 项真实 Electron 界面回归通过，约 1.9 分钟**；保存合成密钥后重启，bootstrap 和设置页不调用系统解密 API |
+| `npm run test:dev` | `bash run.sh → Vite → Electron → Mock → 接受修改` 通过，Node 24.4.1 / arm64 |
+| `npm run dist:mac` | 生成 `Quillhaya-1.0.1-arm64.dmg`、blockmap 和 `.app`；Bundle ID 为 `com.zloyan.quillhaya` |
+| `npm run test:package` | **真实系统钥匙串验证通过**：新建隔离会话，保存合成 API Key，密文文件不含明文，退出后将同一构建复制到另一位置，重新打开并使用已保存密钥调用本地 HTTP 测试端点成功；无再次授权交互 |
+| 包内默认数据 | 全新测试目录首次启动只含默认 Mock 配置，无恢复草稿；app.asar 清单确认不含 settings.json、credentials.json、draft.json |
+| DMG 实物核对 | 只读挂载镜像，Info.plist 与 app.asar 和已测试构建逐字节哈希一致；镜像内应用签名校验通过，随后正常卸载 |
+| `codesign --verify --deep --strict` | 原构建及测试复制的 `.app` 均通过；仍为 ad-hoc 签名 |
+| 运行产物名称检查 | `out/` 中不存在旧应用名或旧测试数据目录变量 |
+| `git diff --check` | 通过 |
+
+常规 Playwright 的加密往返测试使用其自动化环境，不能单独证明系统钥匙串行为。安装包测试明确断言没有 `use-mock-keychain`，只使用合成密钥和本地服务；系统已创建 `Quillhaya Safe Storage`。验证没有导出钥匙串中的加密密钥。正常重启验证针对同一构建，不等同于承诺更换签名证书、钥匙串被锁定或权限被撤销时也免授权。
+
+安装包测试最初在复制后的启动步骤退出：Node `fs.cp` 默认把框架内相对符号链接改成绝对链接，导致副本加载 ICU 资源失败。现已设置 `verbatimSymlinks: true`，保留应用框架结构，并在副本启动前校验签名；修正后完整流程通过。此问题发生在测试复制逻辑，原安装包的密钥保存步骤成功。
+
+### 本次测试执行失误与防护
+
+最初一次构建因 TypeScript 返回类型错误失败后，执行了尚未重新构建的旧产物。旧产物不识别新隔离环境变量，导致测试把合成模型配置与凭据写入了旧版真实数据目录的 `settings.json`、`credentials.json`；旧 `draft.json` 未被修改。这是测试执行失误，并非预期迁移行为。已向用户说明；用户明确回复“不需要旧文件备份”，因此没有继续恢复旧配置，也没有声称它们已恢复。
+
+修正构建后，所有界面测试改用统一启动函数：先核对产物支持 `QUILLHAYA_TEST_USER_DATA`，再核对实际进程的 userData 路径；不匹配立即退出，禁止进入后续写入步骤。完整 46 项回归和安装包验证是在修正后隔离目录中通过的。后续未再次操作旧目录。
+
+## 2026-10-29 移除主界面标题旁图标
 
 按用户要求删除左上角名称旁的图片及专用 CSS，只保留 `Quillhaya - Writing Assistant` 文字；Dock、安装包及启动页图标保留。同步调整已有界面和安装包检查，技术说明见 [ICON-ADAPTATION.md](ICON-ADAPTATION.md)。
 

@@ -1,6 +1,6 @@
 {
   "name": "quillhaya",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "A quiet, local-first English writing workspace for macOS",
   "main": "out/main/main.js",
@@ -32,7 +32,7 @@
     "check": "npm run typecheck && npm test && npm run build"
   },
   "build": {
-    "appId": "com.zloyan.writingassistant",
+    "appId": "com.zloyan.quillhaya",
     "productName": "Quillhaya",
     "directories": {
       "output": "dist"

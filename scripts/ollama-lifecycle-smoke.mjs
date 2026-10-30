@@ -7,8 +7,8 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const settings = JSON.parse(await readFile(process.env.TWA_OLLAMA_SETTINGS ?? join(homedir(), 'Library/Application Support/TOEFL Writing Assistant/settings.json'), 'utf8'));
-const profile = settings.profiles.find(p => p.id === (process.env.TWA_OLLAMA_PROFILE ?? settings.defaultProfileId));
+const settings = JSON.parse(await readFile(process.env.QUILLHAYA_OLLAMA_SETTINGS ?? join(homedir(), 'Library/Application Support/Quillhaya/settings.json'), 'utf8'));
+const profile = settings.profiles.find(p => p.id === (process.env.QUILLHAYA_OLLAMA_PROFILE ?? settings.defaultProfileId));
 assert(profile?.kind === 'ollama' && profile.auth === 'none', 'A local unauthenticated Ollama profile is required.');
 assert(['localhost', '127.0.0.1', '[::1]'].includes(new URL(profile.baseUrl).hostname), 'Only loopback Ollama endpoints are allowed.');
 const directory = await mkdtemp(join(tmpdir(), 'twa-lifecycle-'));

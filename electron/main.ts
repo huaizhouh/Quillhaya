@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { DocumentSchema, ProfileSchema, RequestSchema, SettingsSchema, type MenuCommand, type ModelProfile, type Reply } from '../src/models/schema';
 import { LocalStore } from './storage/store';
+import { storageIdentity } from './storage/identity';
 import { Documents } from './storage/documents';
 import { CompatibleProvider, MockProvider, type LLMProvider } from './llm/provider';
 import { RequestQueue, serialKey } from './llm/queue';
@@ -14,11 +15,10 @@ import { ConnectionDiagnostics, diagnosticHTML, type ConnectionReport } from './
 import { installContextMenu } from './context-menu';
 
 const here = dirname(fileURLToPath(import.meta.url));
-// Keep the pre-ready name: Electron 44 uses it to initialize the macOS
-// Keychain service. Rename the visible app after ready so existing keys decrypt.
-// The data directory also stays stable; tests always use an isolated override.
-app.setName('TOEFL Writing Assistant');
-app.setPath('userData', process.env.TWA_TEST_USER_DATA || join(app.getPath('appData'), 'TOEFL Writing Assistant'));
+// Set the final identity before Electron initializes its system encryption provider.
+const storage = storageIdentity(app.isPackaged, app.getPath('appData'), process.env.QUILLHAYA_TEST_USER_DATA);
+app.setName(storage.name);
+app.setPath('userData', storage.directory);
 let window: BrowserWindow | null = null;
 let detailsWindow: BrowserWindow | null = null;
 let contextMenu: ReturnType<typeof installContextMenu> | undefined;
@@ -49,12 +49,12 @@ function handle<T>(channel: string, action: (data: unknown) => Promise<T> | T) {
     catch (error) { return { ok: false, error: error instanceof z.ZodError ? { code: 'validation', message: '输入参数无效，请检查文本长度、地址和设置。', retryable: false } : failure(error) }; }
   });
 }
-function provider(profile: ModelProfile, transientKey?: string): LLMProvider {
+async function provider(profile: ModelProfile, transientKey?: string): Promise<LLMProvider> {
   if (profile.kind === 'mock') return new MockProvider(profile.mockBehavior);
   if (transientKey !== undefined) return new CompatibleProvider(profile, transientKey);
   const cacheKey = JSON.stringify(profile);
   let p = providers.get(cacheKey);
-  if (!p) { p = new CompatibleProvider(profile, store.key(profile)); providers.set(cacheKey, p); }
+  if (!p) { p = new CompatibleProvider(profile, await store.key(profile)); providers.set(cacheKey, p); }
   return p;
 }
 function command(value: MenuCommand) { window?.webContents.send('menu:command', value); }
@@ -139,9 +139,10 @@ function registerIPC() {
     const profile = store.settings.profiles.find(p => p.id === request.profile_id);
     if (!profile) throw new AppError('profile', '模型配置不存在，请重新选择。');
     window?.webContents.send('llm:progress', { requestId: request.request_id, phase: 'queued' });
-    return queue.add(request.request_id, signal => {
+    return queue.add(request.request_id, async signal => {
       window?.webContents.send('llm:progress', { requestId: request.request_id, phase: 'running' });
-      const p = provider(profile);
+      const p = await provider(profile);
+      signal.throwIfAborted();
       runtime.track(profile, profile.kind === 'ollama' ? () => p.release!() : undefined);
       return p.analyze(request, signal);
     }, serialKey(profile));
@@ -151,7 +152,7 @@ function registerIPC() {
     if (closing) throw new AppError('closing', '正在关闭应用并释放模型。');
     const { profile, key, requestId } = z.object({ profile: ProfileSchema, key: z.string().max(8000).regex(/^[^\r\n]*$/).optional(), requestId: z.string().uuid().optional() }).strict().parse(data);
     connectionReport = undefined;
-    const resolvedKey = key || store.key(profile);
+    const resolvedKey = key || await store.key(profile);
     const diagnostics = new ConnectionDiagnostics(profile, resolvedKey);
     const p: LLMProvider = profile.kind === 'mock' ? new MockProvider(profile.mockBehavior) : new CompatibleProvider(profile, resolvedKey, diagnostics.fetcher());
     try { return await runtime.test(requestId ?? crypto.randomUUID(), profile, signal => p.testConnection(signal), profile.kind === 'ollama' ? () => p.release!() : undefined); }
@@ -175,10 +176,10 @@ function registerIPC() {
     await detail.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(diagnosticHTML(connectionReport))}`);
     detail.show();
   });
-  handle('llm:stop', data => {
+  handle('llm:stop', async data => {
     const input = z.object({ profile: ProfileSchema.optional(), key: z.string().max(8000).regex(/^[^\r\n]*$/).optional() }).strict().parse(data);
     const profile = input.profile ?? store.settings.profiles.find(p => p.id === store.settings.defaultProfileId)!;
-    if (profile.kind === 'ollama') { const p = provider(profile, input.key || undefined); runtime.track(profile, () => p.release!()); }
+    if (profile.kind === 'ollama') { const p = await provider(profile, input.key || undefined); runtime.track(profile, () => p.release!()); }
     return runtime.stop();
   });
   handle('document:draft', data => documents.draft(DocumentSchema.parse(data)));
@@ -225,7 +226,6 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  app.setName('Quillhaya');
   if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(here, '../../icon/generated/app-icon.png'));
   store = new LocalStore(app.getPath('userData')); await store.init();
   nativeTheme.themeSource = store.settings.theme;
