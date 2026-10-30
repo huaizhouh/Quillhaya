@@ -18,7 +18,7 @@ codesign --verify --deep --strict 'dist/mac-arm64/Quillhaya.app'
 已完成源码构建且图标未更换、只需重新打包时：
 
 ```bash
-npx --no electron-builder --mac --arm64 --publish never
+node node_modules/electron-builder/out/cli/cli.js --mac --arm64 --publish never
 ```
 
 ## 名称、图标与产物
@@ -33,7 +33,7 @@ npx --no electron-builder --mac --arm64 --publish never
 | macOS 应用图标 | `icon/generated/app-icon.icns` |
 | 启动页、源码运行 Dock 图标 | `icon/generated/app-icon.png` |
 | 应用 | `dist/mac-arm64/Quillhaya.app` |
-| 安装镜像 | `dist/Quillhaya-1.0.1-arm64.dmg`（版本号跟随 package.json） |
+| 安装镜像 | `dist/Quillhaya-1.0.2-arm64.dmg`（版本号跟随 package.json） |
 
 `icon/icon.png` 是用户提供的羽毛原图，保持原样。`npm run dev` 和 `npm run build` 会自动执行 `npm run icons`：使用系统 Swift / CoreGraphics 裁去多余白边，生成圆角底板和透明边距，并通过 `iconutil` 导出 ICNS；`pack:mac` 和 `dist:mac` 因调用 build 也会自动更新图标。
 

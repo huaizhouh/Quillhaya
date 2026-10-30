@@ -61,6 +61,8 @@ export function SettingsDialog({ settings, keyStatus, onClose, onSaved, onStopMo
     setDetailsId(undefined);
     const target = selectedProfile(); if (!target) return;
     setBusy(true); setMessage('正在停止请求并释放 Ollama 模型…');
+    // Keep this open draft from restoring the previous automatic-analysis value.
+    setDraft(current => ({ ...current, autoAnalyze: false }));
     try { setMessage(await onStopModels(target, keys[selected] ?? undefined)); }
     catch { setMessage('停止请求失败，请重试。'); } finally { setBusy(false); }
   };
