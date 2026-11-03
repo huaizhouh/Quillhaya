@@ -1,5 +1,7 @@
 # 技术实现说明：Quillhaya - Writing Assistant
 
+反馈收藏、完整快照与持久化排序见 [ISSUE1103-IMPLEMENTATION.md](ISSUE1103-IMPLEMENTATION.md)。
+
 当前独立数据目录与异步密钥存储见 [STORAGE-ISOLATION.md](STORAGE-ISOLATION.md)。
 
 羽毛图标与 macOS 尺寸适配见 [ICON-ADAPTATION.md](ICON-ADAPTATION.md)。

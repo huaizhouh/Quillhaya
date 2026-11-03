@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { AnalysisProgress, ContextMenuRequest, DesktopAPI, MenuCommand } from '../src/models/schema';
 
 const api: DesktopAPI = {
+  listFavorites: () => ipcRenderer.invoke('favorites:list'),
+  addFavorite: input => ipcRenderer.invoke('favorites:add', input),
+  removeFavorite: id => ipcRenderer.invoke('favorites:remove', id),
+  reorderFavorites: order => ipcRenderer.invoke('favorites:reorder', order),
   bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
   saveSettings: (settings, keys) => ipcRenderer.invoke('settings:save', { settings, keys }),
   testConnection: (profile, key, requestId) => ipcRenderer.invoke('llm:test', { profile, key, requestId }),

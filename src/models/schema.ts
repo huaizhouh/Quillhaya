@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { FavoriteInput, FavoriteLibrary, FavoriteOrder } from './favorites';
 
 export const ModeSchema = z.enum(['discussion', 'email', 'general']);
 export type WritingMode = z.infer<typeof ModeSchema>;
@@ -96,6 +97,10 @@ export function makeProfile(kind: ModelProfile['kind'], id = kind as string): Mo
 export const defaultSettings: Settings = { theme: 'system', fontSize: 18, debounceMs: 1200, revisionDebounceMs: 3000, autoAnalyze: true, defaultProfileId: 'mock', profiles: [makeProfile('mock')] };
 
 export interface DesktopAPI {
+  listFavorites(): Promise<Reply<FavoriteLibrary>>;
+  addFavorite(input: FavoriteInput): Promise<Reply<FavoriteLibrary>>;
+  removeFavorite(id: string): Promise<Reply<FavoriteLibrary>>;
+  reorderFavorites(order: FavoriteOrder): Promise<Reply<FavoriteLibrary>>;
   bootstrap(): Promise<Reply<Bootstrap>>;
   saveSettings(settings: Settings, keys: Record<string, string | null>): Promise<Reply<{ settings: Settings; keyStatus: Record<string, boolean>; analysisChanged: boolean }>>;
   testConnection(profile: ModelProfile, key?: string, requestId?: string): Promise<Reply<string>>;
