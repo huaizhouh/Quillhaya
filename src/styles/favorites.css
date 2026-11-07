@@ -1,0 +1,22 @@
+.favorite-button[aria-pressed='true'] { color: var(--danger); }
+.favorites-dialog { width: 820px; max-width: calc(100vw - 48px); height: 760px; max-height: calc(100vh - 56px); padding: 0; border: 1px solid var(--line); border-radius: 14px; color: var(--text); background: var(--sidebar); box-shadow: var(--shadow); }
+.favorites-dialog[open] { display: flex; flex-direction: column; }
+.favorites-dialog::backdrop { background: #13201855; backdrop-filter: blur(3px); }
+.favorites-heading { display: flex; justify-content: space-between; align-items: center; padding: 24px 26px 18px; background: var(--paper); }
+.favorites-heading h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 20px; font-weight: 600; }
+.favorites-heading h2 svg { color: var(--accent); }
+.favorites-heading p { margin: 0; color: var(--secondary); font-size: 12px; }
+.favorites-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 26px; border-block: 1px solid var(--line); color: var(--secondary); }
+.favorites-toolbar label { display: flex; align-items: center; gap: 10px; }
+.favorites-toolbar select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--text); }
+.favorites-content { overflow-y: auto; flex: 1; min-height: 0; padding: 20px 26px; }
+.favorite-item { margin-bottom: 24px; }
+.favorite-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: var(--secondary); font-size: 11px; }
+.favorite-meta > div { display: flex; }
+.favorites-content .original-text { margin: 12px 0; white-space: pre-wrap; }
+.favorites-content .card-description, .favorites-content .issue-details p, .favorites-content .suggestion p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.favorites-empty { padding: 68px 12px; text-align: center; color: var(--secondary); line-height: 1.7; }
+.favorites-empty > svg { color: var(--accent); }
+.favorites-empty h3 { color: var(--text); font-weight: 500; }
+.favorites-error { padding: 12px; margin-bottom: 16px; border: 1px solid var(--danger); border-radius: 8px; color: var(--danger); }
+@media (max-width: 700px) { .favorites-heading, .favorites-toolbar, .favorites-content { padding-inline: 16px; } }

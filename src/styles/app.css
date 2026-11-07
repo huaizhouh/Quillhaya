@@ -1,4 +1,5 @@
 @import url('./settings.css');
+@import url('./favorites.css');
 
 :root { color-scheme: light; --bg: #f6f7f4; --paper: #fff; --sidebar: #f5f7f4; --text: #293b34; --secondary: #738078; --muted: #7b877f; --line: #e4e9e1; --soft: #edf1eb; --accent: #356249; --accent-hover: #294e3a; --accent-soft: #e7eee6; --amber: #a87532; --amber-soft: #f7f1e6; --danger: #ae4c41; --shadow: 0 12px 40px #1f382c12; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
 :root[data-theme='dark'] { color-scheme: dark; --bg: #1d2421; --paper: #232b27; --sidebar: #202823; --text: #e2e9e1; --secondary: #a2afa5; --muted: #9aa89e; --line: #374138; --soft: #2c372f; --accent: #a0c6a3; --accent-hover: #b7d5b9; --accent-soft: #324537; --amber: #d4b57d; --amber-soft: #423b2d; --danger: #e59a90; --shadow: 0 12px 40px #0003; }
@@ -117,7 +118,8 @@ button svg { flex-shrink: 0; }
 .suggestion .eyebrow { color: var(--accent); font-size: 9px; letter-spacing: .5px; }
 .suggestion p { font-family: 'Iowan Old Style', Georgia, serif; font-size: 15px; margin: 4px 0 0; line-height: 1.65; overflow-wrap: anywhere; }
 .card-description { font-size: 11px; line-height: 1.85; margin: 12px 0 0; color: var(--secondary); }
-.card-actions { display: flex; align-items: center; gap: 6px; margin-top: 14px; }
+.card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 14px; }
+.card-actions > button { flex-shrink: 0; white-space: nowrap; }
 .accept-button { background: var(--accent); color: var(--paper); border-radius: 5px; display: flex; gap: 5px; padding: 7px 9px; align-items: center; font-size: 10px; }
 .accept-button:hover { background: var(--accent-hover); }
 .card-actions .icon-button { padding: 5px; }.card-actions .text-button { font-size: 10px; }

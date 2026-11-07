@@ -5,6 +5,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { DocumentSchema, ProfileSchema, RequestSchema, SettingsSchema, type MenuCommand, type ModelProfile, type Reply } from '../src/models/schema';
 import { LocalStore } from './storage/store';
+import { FavoriteStore } from './storage/favorites';
+import { FavoriteInputSchema, FavoriteOrderSchema } from '../src/models/favorites';
 import { storageIdentity } from './storage/identity';
 import { Documents } from './storage/documents';
 import { CompatibleProvider, MockProvider, type LLMProvider } from './llm/provider';
@@ -32,6 +34,7 @@ let closing: Promise<void> | undefined;
 const queue = new RequestQueue();
 const runtime = new ModelRuntime(queue);
 let store: LocalStore;
+let favorites: FavoriteStore;
 let documents: Documents;
 const providers = new Map<string, LLMProvider>();
 const rendererPath = join(here, '../renderer/index.html');
@@ -70,6 +73,7 @@ function finishClose(): Promise<void> {
       if (reply.response === 1) break;
       if (reply.response !== 0) { quitRequested = false; return; }
     }
+    await favorites.flush();
     allowClose = true;
     if (quitRequested) app.quit(); else window?.close();
   }).finally(() => { closing = undefined; });
@@ -111,6 +115,10 @@ function createMenu() {
 }
 
 function registerIPC() {
+  handle('favorites:list', () => favorites.list());
+  handle('favorites:add', data => favorites.add(FavoriteInputSchema.parse(data)));
+  handle('favorites:remove', data => favorites.remove(z.string().uuid().parse(data)));
+  handle('favorites:reorder', data => favorites.reorder(FavoriteOrderSchema.parse(data)));
   handle('context-menu:show', data => {
     const { id, sentenceId } = z.object({ id: z.string().uuid(), sentenceId: z.string().min(1).max(100).optional() }).strict().parse(data);
     contextMenu?.show(id, sentenceId);
@@ -228,6 +236,7 @@ async function createWindow() {
 app.whenReady().then(async () => {
   if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(here, '../../icon/generated/app-icon.png'));
   store = new LocalStore(app.getPath('userData')); await store.init();
+  favorites = new FavoriteStore(app.getPath('userData'));
   nativeTheme.themeSource = store.settings.theme;
   documents = new Documents(store, () => window!);
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));

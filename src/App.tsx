@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { ArrowDownToLine, ArrowRight, BookOpen, Check, ChevronDown, Clock3, FilePlus2, FileText, FolderOpen, PanelRightClose, PanelRightOpen, Pause, Play, Plus, Power, RotateCcw, Settings2, Sparkles, TextCursorInput, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, BookOpen, Check, ChevronDown, Clock3, FilePlus2, FileText, FolderOpen, Heart, PanelRightClose, PanelRightOpen, Pause, Play, Plus, Power, RotateCcw, Settings2, Sparkles, TextCursorInput, X } from 'lucide-react';
 import appIcon from '../icon/generated/app-icon.png';
 import { WritingEditor, type EditorHandle, type ProblemMark } from './editor/WritingEditor';
 import { FeedbackCard } from './components/FeedbackCard';
+import { FavoritesDialog } from './components/FavoritesDialog';
+import { useFavorites } from './core/useFavorites';
 import { SettingsDialog } from './components/SettingsDialog';
 import { TaskContextInput } from './components/TaskContextInput';
 import { useWritingTimer } from './core/useWritingTimer';
@@ -22,6 +24,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   const [ready, setReady] = useState(false);
   const [bootError, setBootError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [entries, setEntries] = useState<FeedbackEntry[]>([]);
   const entriesRef = useRef(entries); entriesRef.current = entries;
   const [feedbackTarget, setFeedbackTarget] = useState<{ id: string } | null>(null);
@@ -52,6 +55,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   const automatic = settings.autoAnalyze && !modelsStopped;
   const profile = settings.profiles.find(p => p.id === settings.defaultProfileId)!;
   const notify = useCallback((message: string) => setToast(message), []);
+  const favorites = useFavorites(notify);
   const words = useMemo(() => wordCount(doc.text), [doc.text]);
   const assessed = entries.filter(e => !e.ignored);
   const goodCount = assessed.filter(e => e.result?.status === 'good').length;
@@ -305,7 +309,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
   if (bootError) return <div className="boot-screen"><img src={appIcon} width={64} height={64} alt="" /><h1>Quillhaya - Writing Assistant</h1><p>{bootError}</p></div>;
   if (!ready) return <div className="boot-screen"><img src={appIcon} width={64} height={64} alt="" /><p>正在打开你的写作空间…</p></div>;
   return <div className="app-shell" style={{ '--editor-font-size': `${settings.fontSize}px`, '--sidebar-width': `${sidebarWidth}%` } as CSSProperties}>
-    <header className="titlebar"><div className="app-brand"><span>Quillhaya - <b>Writing Assistant</b></span></div><div className="titlebar-actions"><span className="local-indicator"><span />本地写作空间</span><button className="icon-button" aria-label="打开设置" title="设置 ⌘," onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></div></header>
+    <header className="titlebar"><div className="app-brand"><span>Quillhaya - <b>Writing Assistant</b></span></div><div className="titlebar-actions"><span className="local-indicator"><span />本地写作空间</span><button className="icon-button" aria-label="打开收藏夹" title="收藏夹" onClick={() => setFavoritesOpen(true)}><Heart size={17} /></button><button className="icon-button" aria-label="打开设置" title="设置 ⌘," onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></div></header>
     <div className="workspace-toolbar"><div className="document-info"><FileText size={18} /><span className="document-name">{doc.name}</span><span className={`save-pill ${!doc.hasFile || doc.dirty ? 'unsaved' : ''}`}>{!doc.hasFile || doc.dirty ? '未保存至文件' : '已保存'}</span></div><div className="file-actions"><button className="icon-button" aria-label="新建文档" title="新建 ⌘N" disabled={fileBusy} onClick={() => void action('new')}><FilePlus2 size={17} /></button><button className="icon-button" aria-label="打开文档" title="打开 ⌘O" disabled={fileBusy} onClick={() => void action('open')}><FolderOpen size={18} /></button><button className="secondary-button compact" disabled={fileBusy} onClick={() => void action('save')}><ArrowDownToLine size={15} />保存<span className="shortcut">⌘S</span></button><span className="toolbar-divider" /><button className="icon-button" aria-label={collapsed ? '展开反馈' : '折叠反馈'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <PanelRightOpen size={19} /> : <PanelRightClose size={19} />}</button></div></div>
     {restored && <div className="restore-banner"><Check size={14} />已恢复上次会话。自动草稿不会覆盖原始 Markdown 文件。<button aria-label="关闭恢复提示" className="icon-button" onClick={() => setRestored(false)}><X size={14} /></button></div>}
     <main className={`workspace ${collapsed ? 'feedback-collapsed' : ''}`}>
@@ -323,8 +327,8 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
           <div className="feedback-header"><span className="eyebrow">A SECOND PAIR OF EYES</span><div><h2><Sparkles size={20} />写作反馈</h2><div className="model-actions"><button className="icon-button" disabled={modelStopping} aria-label={automatic ? '暂停自动分析' : '恢复自动分析'} title={automatic ? '暂停自动分析' : '恢复自动分析'} onClick={() => void toggleAuto()}>{automatic ? <Pause size={16} /> : <Play size={16} />}</button><button className="icon-button" disabled={modelStopping} aria-label="停止并释放模型" title="停止所有请求并释放本应用使用的 Ollama 模型" onClick={() => void stopModels()}>{modelStopping ? <span className="spinner" /> : <Power size={16} />}</button></div></div><p>只在有必要时，给你一点建议。</p><div className="model-status"><span className={automatic ? 'live-dot' : 'paused-dot'} /><select aria-label="当前模型" value={settings.defaultProfileId} onChange={e => void switchModel(e.target.value)}>{settings.profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>{profile.kind === 'mock' && <span className="demo-badge">演示</span>}<span className="analysis-state">{!automatic ? '已暂停' : activeCount || queuedCount ? [activeCount ? `${activeCount} 句分析中` : '', queuedCount ? `${queuedCount} 句排队中` : ''].filter(Boolean).join(' · ') : '自动分析已开启'}</span></div></div>
           <div className="feedback-summary"><span><i className="summary-dot amber" />{revisionCount} 条建议</span><span><i className="summary-dot green" />{goodCount} 句表达良好</span><button className="text-button" title="只发送选中内容所在的句子与必要上下文" onClick={analyzeSelection}>分析选中内容</button></div>
           <div className="feedback-scroll" ref={feedbackScroll} data-located-sentence={feedbackTarget?.id}>
-            {full && <FeedbackCard scope="document" entry={full} index={0} onIgnore={() => setFull(null)} onRetry={() => void analyzeFull()} onLocate={() => editor.current?.locate(0, 0)} notify={notify} />}
-            {entries.length ? entries.map((entry, index) => <FeedbackCard key={entry.id} highlighted={entry.id === feedbackTarget?.id} entry={entry} index={index} onAccept={() => accept(entry.id)} onIgnore={() => coordinator.current?.ignore(entry.id)} onRetry={() => { if (!modelStopping) coordinator.current?.reevaluate(entry.id); }} onLocate={() => editor.current?.locate(entry.from, entry.to)} notify={notify} />) : <div className="feedback-empty"><div className="empty-illustration"><div className="mini-page"><span /><span /><span /><div><Check size={15} /></div></div><span className="mini-spark">✧</span></div><h3>给思考留出空间。</h3><p>写下第一句英语，<br />中文反馈就会在这里等你。</p><div className="empty-principles"><span><Check size={14} />保留你的原意与语气</span><span><Check size={14} />自然的表达，无需修改</span><span><Check size={14} />是否接受，由你决定</span></div>{profile.kind === 'mock' && <button className="secondary-button" onClick={() => void action('example')}><Plus size={14} />体验示例反馈</button>}</div>}
+            {full && <FeedbackCard scope="document" entry={full} index={0} favorite={Boolean(full.result && favorites.has({ scope: 'document', result: full.result }))} favoriteBusy={favorites.busy || !favorites.library} onFavorite={() => { if (full.result) void favorites.toggle({ scope: 'document', result: full.result }); }} onIgnore={() => setFull(null)} onRetry={() => void analyzeFull()} onLocate={() => editor.current?.locate(0, 0)} notify={notify} />}
+            {entries.length ? entries.map((entry, index) => <FeedbackCard key={entry.id} highlighted={entry.id === feedbackTarget?.id} entry={entry} index={index} favorite={Boolean(entry.result && favorites.has({ scope: 'sentence', result: entry.result }))} favoriteBusy={favorites.busy || !favorites.library} onFavorite={() => { if (entry.result) void favorites.toggle({ scope: 'sentence', result: entry.result }); }} onAccept={() => accept(entry.id)} onIgnore={() => coordinator.current?.ignore(entry.id)} onRetry={() => { if (!modelStopping) coordinator.current?.reevaluate(entry.id); }} onLocate={() => editor.current?.locate(entry.from, entry.to)} notify={notify} />) : <div className="feedback-empty"><div className="empty-illustration"><div className="mini-page"><span /><span /><span /><div><Check size={15} /></div></div><span className="mini-spark">✧</span></div><h3>给思考留出空间。</h3><p>写下第一句英语，<br />中文反馈就会在这里等你。</p><div className="empty-principles"><span><Check size={14} />保留你的原意与语气</span><span><Check size={14} />自然的表达，无需修改</span><span><Check size={14} />是否接受，由你决定</span></div>{profile.kind === 'mock' && <button className="secondary-button" onClick={() => void action('example')}><Plus size={14} />体验示例反馈</button>}</div>}
             {profile.kind === 'mock' && entries.length > 0 && <p className="demo-footnote">MOCK 演示 · 固定规则，仅展示交互。<br />在设置中连接真实模型，获取实际写作反馈。</p>}
           </div>
           <footer className="feedback-footer"><button className="analyze-button" disabled={Boolean(full?.requestId) || modelStopping} onClick={() => void analyzeFull()}><Sparkles size={16} />分析全文<ArrowRight size={15} /></button><p>主动发送全文 · 关注结构与连贯性</p></footer>
@@ -332,6 +336,7 @@ export default function App({ onSnapshot }: { onSnapshot: (document: WritingDocu
       </>}
     </main>
     {toast && <div className="toast" role="status">{toast}<button className="icon-button" aria-label="关闭提示" onClick={() => setToast('')}><X size={14} /></button></div>}
+    {favoritesOpen && <FavoritesDialog library={favorites.library} busy={favorites.busy} error={favorites.error} onReload={() => void favorites.reload()} onRemove={id => void favorites.remove(id)} onReorder={order => void favorites.reorder(order)} onClose={() => setFavoritesOpen(false)} notify={notify} />}
     {settingsOpen && <SettingsDialog settings={settings} keyStatus={keyStatus} onSaved={saveSettings} onStopModels={stopModels} onClose={() => setSettingsOpen(false)} />}
     {closing && <dialog className="closing-dialog" ref={closingDialog} onCancel={event => event.preventDefault()} aria-label="正在关闭应用"><p role="status"><span className="spinner" />正在释放模型并关闭…</p></dialog>}
   </div>;
