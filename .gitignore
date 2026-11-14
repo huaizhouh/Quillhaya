@@ -12,4 +12,5 @@ playwright-report/
 *.log
 tmp.md
 issues/*
-icon/*
+# icon/*
+icon/icon_old
