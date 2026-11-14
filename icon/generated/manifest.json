@@ -1,0 +1,63 @@
+{
+  "artworkFractionOfTile" : 0.66000000000000003,
+  "canvasSize" : 1024,
+  "cornerRadius" : 184,
+  "representations" : [
+    {
+      "file" : "icon_16x16.png",
+      "pixels" : 16
+    },
+    {
+      "file" : "icon_16x16@2x.png",
+      "pixels" : 32
+    },
+    {
+      "file" : "icon_32x32.png",
+      "pixels" : 32
+    },
+    {
+      "file" : "icon_32x32@2x.png",
+      "pixels" : 64
+    },
+    {
+      "file" : "icon_128x128.png",
+      "pixels" : 128
+    },
+    {
+      "file" : "icon_128x128@2x.png",
+      "pixels" : 256
+    },
+    {
+      "file" : "icon_256x256.png",
+      "pixels" : 256
+    },
+    {
+      "file" : "icon_256x256@2x.png",
+      "pixels" : 512
+    },
+    {
+      "file" : "icon_512x512.png",
+      "pixels" : 512
+    },
+    {
+      "file" : "icon_512x512@2x.png",
+      "pixels" : 1024
+    }
+  ],
+  "source" : "icon\/icon.png",
+  "sourceArtworkBounds" : [
+    300,
+    279,
+    960,
+    859
+  ],
+  "sourceCrop" : [
+    130,
+    69,
+    1000,
+    1000
+  ],
+  "sourceSHA256" : "615c19c88c70b9ac561fee525a487bc2d1cae97c8be6cc17e032d2b57eb5affd",
+  "tileInset" : 100,
+  "tileSize" : 824
+}
