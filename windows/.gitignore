@@ -1,0 +1,10 @@
+node_modules/
+.tools/
+.cache/
+.workspace/
+out/
+dist/
+test-results/
+playwright-report/
+reports/
+*.log

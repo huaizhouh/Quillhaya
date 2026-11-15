@@ -1,0 +1,247 @@
+{
+  "electron/main.ts": {
+    "sha256": "78f52827b44ae7b795104cdff7bdc2a65a280429878e6943a021d44c4fa94b56",
+    "edits": [
+      {
+        "before": "app.setPath('userData', storage.directory);",
+        "after": "app.setPath('userData', storage.directory);\napp.setAppUserModelId('com.zloyan.quillhaya');",
+        "count": 1
+      },
+      {
+        "before": "titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 22, y: 23 },",
+        "after": "titleBarStyle: 'default', icon: app.isPackaged ? join(process.resourcesPath, 'app-icon.ico') : join(here, '../../assets/app-icon.ico'),",
+        "count": 1
+      },
+      {
+        "before": "{ type: 'separator' }, { role: 'close' }",
+        "after": "{ type: 'separator' },\n      { label: '设置…', accelerator: 'Ctrl+,', click: () => command('settings') },\n      { type: 'separator' }, { label: '退出', accelerator: 'Alt+F4', click: () => app.quit() }",
+        "count": 1
+      }
+    ]
+  },
+  "src/App.tsx": {
+    "sha256": "81071987a15c230fc54973eb35902e4ad93ccd243aa3952ac9e4cfbea5de3ba4",
+    "edits": [
+      {
+        "before": "⌘Z",
+        "after": "Ctrl+Z",
+        "count": 1
+      },
+      {
+        "before": "⌘,",
+        "after": "Ctrl+,",
+        "count": 1
+      },
+      {
+        "before": "⌘N",
+        "after": "Ctrl+N",
+        "count": 1
+      },
+      {
+        "before": "⌘O",
+        "after": "Ctrl+O",
+        "count": 1
+      },
+      {
+        "before": "⌘S",
+        "after": "Ctrl+S",
+        "count": 1
+      }
+    ]
+  },
+  "src/styles/app.css": {
+    "sha256": "35574b536bf3b3b899d321f3f0482dc9d390169cd90f906d005c998ea5eedcdd",
+    "edits": [
+      {
+        "before": "padding: 0 22px 0 98px; -webkit-app-region: drag;",
+        "after": "padding: 0 22px; -webkit-app-region: no-drag;",
+        "count": 1
+      }
+    ]
+  },
+  "electron/storage/store.ts": {
+    "sha256": "7fd995dea6e759b47da547b62a00115e8028ad8524b3ead2269eb986c7c0d446",
+    "edits": [
+      {
+        "before": "请解锁钥匙串后重试，或使用环境变量。",
+        "after": "请检查当前 Windows 账户的系统加密服务后重试，或使用环境变量。",
+        "count": 1
+      }
+    ]
+  },
+  "tests/unit/storage.test.ts": {
+    "sha256": "d00255a0641b3a9cc792f7e809780b85ba8b78fd1a8b7ef54f7b29997d52cc8b",
+    "edits": [
+      {
+        "before": "directory: '/app-data/Quillhaya'",
+        "after": "directory: join('/app-data', 'Quillhaya')",
+        "count": 1
+      },
+      {
+        "before": "directory: '/app-data/Quillhaya Development'",
+        "after": "directory: join('/app-data', 'Quillhaya Development')",
+        "count": 1
+      }
+    ]
+  },
+  "tests/unit/favorites.test.ts": {
+    "sha256": "938bbe573986334b84a33d2de81b7b2e34520d52c2acc499fa22199d4e136fbb",
+    "edits": [
+      {
+        "before": "expect((await stat(join(directory, 'favorites.json'))).mode & 0o777).toBe(0o600);",
+        "after": "// POSIX mode bits are not Windows ACLs; verify the actual file here.\n    expect((await stat(join(directory, 'favorites.json'))).isFile()).toBe(true);",
+        "count": 1
+      }
+    ]
+  },
+  "tests/e2e/app.spec.ts": {
+    "sha256": "e6430948dad40a736681eda599afbe81cf08808814ed7878f03b830c5935605c",
+    "edits": [
+      {
+        "before": "'Meta+z'",
+        "after": "'Control+z'",
+        "count": 1
+      },
+      {
+        "before": "'Meta+End'",
+        "after": "'Control+End'",
+        "count": 2
+      },
+      {
+        "before": "'docs'",
+        "after": "'reports/screenshots'",
+        "count": 1
+      },
+      {
+        "before": "'docs/",
+        "after": "'reports/screenshots/",
+        "count": 4
+      },
+      {
+        "before": "menuName: 'Quillhaya Development'",
+        "after": "menuName: '文件'",
+        "count": 1
+      }
+    ]
+  },
+  "tests/e2e/issue1012-2.spec.ts": {
+    "sha256": "c49769e2cd036bd314e0853ccdb591cf111fc0ed218af4c828edeedc4640de41",
+    "edits": [
+      {
+        "before": "`docs/",
+        "after": "`reports/screenshots/",
+        "count": 1
+      }
+    ]
+  },
+  "tests/e2e/issue1013.spec.ts": {
+    "sha256": "e453030ccd1f4d74d67a9f87c94a5f5504b40d697fed203784daae960e05ec3e",
+    "edits": [
+      {
+        "before": "'docs/",
+        "after": "'reports/screenshots/",
+        "count": 3
+      }
+    ]
+  },
+  "tests/e2e/issue1022.spec.ts": {
+    "sha256": "c76c14492140f0c7d90a19586aed3ea41b83ee6c969201e7520235d533ab69b3",
+    "edits": [
+      {
+        "before": "'Meta+ArrowUp'",
+        "after": "'Control+Home'",
+        "count": 1
+      },
+      {
+        "before": "'Meta+A'",
+        "after": "'Control+A'",
+        "count": 2
+      },
+      {
+        "before": "'/private/tmp/twa-issue1022-settings.png'",
+        "after": "'reports/screenshots/issue1022-settings.png'",
+        "count": 1
+      },
+      {
+        "before": "['查询', '剪切', '复制', '粘贴', '粘贴并匹配样式', '全选', '定位到写作反馈']",
+        "after": "['剪切', '复制', '粘贴', '粘贴并匹配样式', '全选', '定位到写作反馈']",
+        "count": 1
+      },
+      {
+        "before": "for (const label of ['查询', '剪切', '复制', '粘贴', '粘贴并匹配样式'])",
+        "after": "expect(items.map(i => i.label)).not.toContain('查询');\n  for (const label of ['剪切', '复制', '粘贴', '粘贴并匹配样式'])",
+        "count": 1
+      },
+      {
+        "before": "['showDefinitionForSelection', 'cut', 'copy', 'paste', 'pasteAndMatchStyle']",
+        "after": "['cut', 'copy', 'paste', 'pasteAndMatchStyle']",
+        "count": 1
+      },
+      {
+        "before": "native edit and Look Up actions",
+        "after": "native Windows edit actions",
+        "count": 1
+      },
+      {
+        "before": "the real macOS context menu",
+        "after": "the real Windows context menu",
+        "count": 1
+      }
+    ]
+  },
+  "src/main.tsx": {
+    "sha256": "877653485ee57573799308ddf8b5be938b999a67f95feb74609602ae34f2dd4d",
+    "edits": [
+      {
+        "before": "⌘Q",
+        "after": "Alt+F4",
+        "count": 1
+      },
+      {
+        "before": "import './styles/app.css';",
+        "after": "import './styles/app.css';\nimport './styles/windows.css';",
+        "count": 1
+      }
+    ]
+  },
+  "electron/llm/connection-diagnostics.ts": {
+    "sha256": "5400e3a8bf9058690b1ecdd6bc35fdc8a5f58f8a9793e4ed8478f0a5cbacdb97",
+    "edits": [
+      {
+        "before": "⌘C",
+        "after": "Ctrl+C",
+        "count": 1
+      }
+    ]
+  },
+  "src/components/SettingsDialog.tsx": {
+    "sha256": "838856c4b4f4e74f0b0a1b9aeb1fae380b89aade78a4f17a3e8c7f8573824f6a",
+    "edits": [
+      {
+        "before": ">⌘</span>",
+        "after": ">✦</span>",
+        "count": 1
+      }
+    ]
+  },
+  "tests/e2e/issue1103.spec.ts": {
+    "sha256": "ca695582df8a4aa4ce47bdf7cf713e7f89e4c4027294955c44cd0b793c63ce00",
+    "edits": [
+      {
+        "before": ".setSize(width, 650)",
+        "after": ".setContentSize(width, 650)",
+        "count": 1
+      },
+      {
+        "before": "join(tmpdir(), `quillhaya-issue1103-${theme}.png`)",
+        "after": "join(process.cwd(), `reports/screenshots/favorites-${theme}.png`)",
+        "count": 1
+      },
+      {
+        "before": "await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(width);",
+        "after": "// Windows DPI conversion can round the requested content size by two CSS pixels.\n    await expect.poll(async () => Math.abs(await page.evaluate(() => window.innerWidth) - width)).toBeLessThanOrEqual(2);",
+        "count": 1
+      }
+    ]
+  }
+}

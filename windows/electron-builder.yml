@@ -1,0 +1,32 @@
+appId: com.zloyan.quillhaya
+productName: Quillhaya
+electronDist: node_modules/electron/dist
+afterPack: scripts/after-pack.cjs
+directories:
+  output: dist
+  buildResources: assets
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: assets/app-icon.ico
+    to: app-icon.ico
+asar: true
+npmRebuild: false
+artifactName: ${productName}-${version}-Windows-${arch}-Setup.${ext}
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/app-icon.ico
+  executableName: Quillhaya
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  runAfterFinish: false
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Quillhaya
