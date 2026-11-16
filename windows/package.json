@@ -1,0 +1,55 @@
+{
+  "name": "quillhaya",
+  "version": "1.0.3",
+  "private": true,
+  "description": "A quiet, local-first English writing workspace for Windows",
+  "main": "out/main/main.js",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "prepare:source": "node scripts/run.mjs prepare",
+    "dev": "node scripts/run.mjs dev",
+    "start": "node scripts/run.mjs start",
+    "typecheck": "node scripts/run.mjs typecheck",
+    "test": "node scripts/run.mjs test",
+    "build": "node scripts/run.mjs build",
+    "test:e2e": "node scripts/run.mjs test:e2e",
+    "check": "node scripts/run.mjs check",
+    "pack:win": "node scripts/run.mjs pack:win",
+    "dist:win": "node scripts/run.mjs dist:win",
+    "test:package": "node scripts/run.mjs test:package",
+    "test:dev": "node scripts/run.mjs test:dev",
+    "icons": "node scripts/icons.mjs",
+    "postinstall": "node scripts/install.mjs",
+    "test:installer": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/installer-smoke.ps1",
+    "verify:source": "node scripts/verify-source.mjs"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "4.7.0",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "4.0.1",
+    "jsdom": "26.1.0",
+    "typescript": "5.9.3",
+    "vite": "6.4.4",
+    "vitest": "5.0.3",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.14",
+    "lucide-react": "0.468.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "author": "Quillhaya contributors"
+}

@@ -1,3 +1,53 @@
+# Quillhaya Windows 版本
+
+已完成独立 Windows 工程、平台适配与 x64 NSIS 安装包。版本为 **1.0.3**；Windows 相关代码、依赖、缓存、测试及产物全部位于本目录，根 Mac 工程保持不变。
+
+安装包：[Quillhaya-1.0.3-Windows-x64-Setup.exe](dist/Quillhaya-1.0.3-Windows-x64-Setup.exe)。这是**未签名**的本地构建，没有自动发布。产物目录被 Git 忽略，克隆后需自行构建。
+
+## 开发与验证
+
+需要 Windows x64 和 Node.js 22.12 或更高版本。在本目录运行（使用 npm.cmd 可避免 PowerShell 选择 npm.ps1）：
+
+```powershell
+cd windows
+npm.cmd ci
+npm.cmd run dev
+npm.cmd run check
+npm.cmd run test:dev
+npm.cmd run pack:win
+npm.cmd run test:package
+npm.cmd run dist:win
+```
+
+本次机器的便携 Node/npm 放在忽略提交的 `.tools/node-v24.22.1-win-x64/`。本机无需修改全局 PATH，也可使用：
+
+```powershell
+cd windows
+.\quillhaya.cmd run dev
+.\quillhaya.cmd run check
+.\quillhaya.cmd run dist:win
+```
+
+完整检查包括类型检查、生产构建、126 项单元测试和 64 项 Electron 界面测试。打包验收另用真实 EXE 检查系统加密、密钥重启后本地 HTTP 调用、草稿、暂停、收藏、撤销、包内容和图标。实际结果见 [VALIDATION.md](VALIDATION.md)。
+
+`npm.cmd run test:installer` 会临时安装、重新安装并卸载本包，检查快捷方式与注册信息；检测到已有 Quillhaya 安装、快捷方式或安装器缓存时会拒绝运行，建议用于干净测试账户。此脚本仅对本次进程设置 PowerShell 执行策略，不修改系统执行策略。
+
+## 数据与维护
+
+- 安装版数据：系统 appData 下的 `Quillhaya`；开发版：`Quillhaya Development`，相互独立。
+- 密钥由 Windows 系统加密；草稿和收藏是本地明文文件。普通卸载保留用户数据。
+- 测试仅用 `QUILLHAYA_TEST_USER_DATA` 指定的临时目录、合成内容和本地服务，不读取真实模型配置。
+- 不编辑 `.workspace/`：它由根源码和 `platform/adaptations.json` 自动生成。源文件变化会触发 SHA256 和片段匹配校验失败，需要审查并更新 Windows 补丁。
+- 原羽毛图案已保留，图标生成命令为 `npm.cmd run icons`，不依赖 Xcode、Swift 或 Git Bash。
+- [IMPLEMENTATION.md](IMPLEMENTATION.md) 说明源码复用、构建隔离、平台差异和维护方式。
+
+系统中文输入法人工验收、不同显示器的真实 DPI、跨版本升级、干净账户测试和真实 Ollama 模型联调仍需补充；已完成的模拟 IME、页面缩放、本地协议测试不能代替这些验证。
+
+---
+
+<details>
+<summary>原始 Windows 开发交接（历史记录，以下待办状态已由上方实现及验收文档取代）</summary>
+
 # Quillhaya Windows 开发交接
 
 交接日期：2026-11-14。本文供在 Windows 上继续工作的 Codex 阅读。
@@ -122,7 +172,7 @@ windows/
 - 初始建议产出 **Windows x64 NSIS 安装程序 `.exe`**，先验证 unpacked 目录内程序，再测试安装版。x64 是默认建议，不代表用户已指定架构；接手后先检查目标机器，ARM64 需求单独确认。便携版属于可选项。
 - 应用名继续使用 Quillhaya，建议继续使用 `com.zloyan.quillhaya`，并核对任务栏 AppUserModelID 与安装快捷方式身份。Windows 构建配置不继承 macOS 的 `identity: "-"`、DMG 或 ICNS 选项。
 - 用户提供的羽毛图案必须保留，不重新绘制。Windows 资源在 `windows/assets/` 生成多尺寸 ICO 与 PNG，实测任务栏、窗口、安装器和高 DPI 下的显示。主界面左上角名称旁不要重新添加图标。
-- **根 `icon/*` 被 Git 忽略**：仅克隆 Git 仓库不一定有 `icon/icon.png`。迁移时需要另外携带原始羽毛图；可检查仓库内 `docs/quillhaya-icon.png` 是否足以作为现有图案来源，但不要未经核对把展示图片当作原始素材。此交接没有复制图标。
+- **根 `icon/*` 被 Git 忽略**：仅克隆 Git 仓库不一定有 `icon/icon.png`。迁移时需要另外携带原始羽毛图；可检查仓库内 `docs/quillhaya-icon.png` 是否足以作为现有图案来源，但不要未经核对把展示图片当作原始素材。此交接没有复制图标。 (GIT忽略问题已修复)
 - 独立设置安装器产物命名（包含版本、Windows、架构），不要覆盖 Mac 的 `dist/`。未配置正式 Windows 签名时如实记录；不要承诺消除 SmartScreen 提示，也不要自动发布安装包。
 
 ### 窗口、快捷键和交互
@@ -208,4 +258,6 @@ npm run dist:win
 - [历史实际验收记录](../docs/VALIDATION.md)
 - [测试数据隔离入口](../tests/e2e/isolated-electron.ts)
 
-`issues/*` 与 `icon/*` 当前被根 Git 忽略；不要假定 Windows 克隆后一定拥有历史 issue 或原始素材。上面的已跟踪文档和源文件是接手的主要依据；运行时仍以接手时实际仓库状态为准。
+`issues/*`  当前被根 Git 忽略；不要假定 Windows 克隆后一定拥有历史 issue 或原始素材。上面的已跟踪文档和源文件是接手的主要依据；运行时仍以接手时实际仓库状态为准。
+
+</details>
